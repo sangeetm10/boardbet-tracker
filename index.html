@@ -888,7 +888,7 @@ function PickChoice({ options, value, onSelect }) {
     </div>
   );
 }
-function PlayerPicker({ value, onChange, onKeyDown, positionFilter, placeholder }) {
+function PlayerPicker({ value, onChange, onKeyDown, positionFilter, exclude, placeholder }) {
   const [open, setOpen] = useState(false);
   const wrapRef = React.useRef(null);
   useEffect(() => {
@@ -899,7 +899,9 @@ function PlayerPicker({ value, onChange, onKeyDown, positionFilter, placeholder 
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
   const q = (value || "").trim().toLowerCase();
-  const pool = positionFilter ? RANKINGS.filter((p) => p.pos === positionFilter) : RANKINGS;
+  const excludeName = (exclude || "").trim().toLowerCase();
+  let pool = positionFilter ? RANKINGS.filter((p) => p.pos === positionFilter) : RANKINGS;
+  if (excludeName) pool = pool.filter((p) => p.name.toLowerCase() !== excludeName);
   const matches = (q ? pool.filter((p) => p.name.toLowerCase().includes(q)) : pool).slice(0, 30);
   return (
     <div className="player-picker" ref={wrapRef}>
@@ -1365,6 +1367,11 @@ function BoardBetTracker() {
     form.category === "h2h" && form.playerB.trim()
       ? RANKINGS.find((p) => p.name.toLowerCase() === form.playerB.trim().toLowerCase())
       : null;
+  const samePlayerH2H =
+    form.category === "h2h" &&
+    form.playerA.trim() &&
+    form.playerB.trim() &&
+    form.playerA.trim().toLowerCase() === form.playerB.trim().toLowerCase();
   // History bets bucketed by season, newest first (historyBets is already
   // sorted season-desc so grouping preserves that order).
   const historyGroups = [];
@@ -2250,6 +2257,7 @@ function BoardBetTracker() {
                 <PlayerPicker
                   placeholder="e.g. Josh Allen"
                   positionFilter={playerBMatch ? playerBMatch.pos : null}
+                  exclude={form.playerB}
                   value={form.playerA}
                   onChange={(v) => {
                     const title = v && form.playerB ? `${v} vs ${form.playerB}` : form.title;
@@ -2262,6 +2270,7 @@ function BoardBetTracker() {
                 <PlayerPicker
                   placeholder="e.g. Lamar Jackson"
                   positionFilter={playerAMatch ? playerAMatch.pos : null}
+                  exclude={form.playerA}
                   value={form.playerB}
                   onChange={(v) => {
                     const title = form.playerA && v ? `${form.playerA} vs ${v}` : form.title;
@@ -2269,6 +2278,11 @@ function BoardBetTracker() {
                   }}
                 />
               </div>
+            </div>
+          )}
+          {samePlayerH2H && (
+            <div className="void-note" style={{ marginTop: 6 }}>
+              Player A and Player B can't be the same player.
             </div>
           )}
           {form.category === "topx" && (
@@ -2433,7 +2447,11 @@ function BoardBetTracker() {
           <div className="submit-row">
             <button
               className="btn primary"
-              disabled={!form.title.trim() || PEOPLE.filter((p) => form.sides[p].in).length < 2}
+              disabled={
+                !form.title.trim() ||
+                PEOPLE.filter((p) => form.sides[p].in).length < 2 ||
+                samePlayerH2H
+              }
               onClick={submitBet}
             >
               {form.mode === "log" ? "Add to board" : "Send proposal"}
