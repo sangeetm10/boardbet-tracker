@@ -72,9 +72,16 @@ function resetSidesPicks(sides) {
 // incompletely-configured H2H/Top X bet) returns null, meaning "use free text".
 function pickOptionsFor(bet) {
   if (bet.category === "h2h" && bet.playerA && bet.playerB) return [bet.playerA, bet.playerB];
-  if (bet.category === "topx" && bet.topPlayer && bet.topX)
-    return [`Top ${bet.topX}`, `Not top ${bet.topX}`];
+  if (bet.category === "topx" && bet.topPlayer && bet.topX) {
+    const opts = [`Top ${bet.topX}`, `Not top ${bet.topX}`];
+    return bet.topXNot ? opts.reverse() : opts;
+  }
   return null;
+}
+// Builds the auto-generated title for a Top X bet, respecting the NOT toggle.
+function topXTitle(player, x, notMode) {
+  if (!player || !x) return null;
+  return notMode ? `${player} — NOT top ${x}?` : `${player} — top ${x}?`;
 }
 // Individual "Enter result" only opens once Week 17 of a bet's season has
 // wrapped (roughly Jan 5 of the following year) — before that there's nothing
@@ -768,6 +775,18 @@ const RANKINGS = [
   { name: "Anthony Gould", pos: "WR", rank: 174 },
   { name: "Dean Connors", pos: "RB", rank: 151 },
 ];
+// Rankings refresh cadence: weekly (Wednesdays) until 2026 NFL kickoff.
+const RANKINGS_UPDATED = "2026-08-12";
+const RANKINGS_REFRESH_CUTOFF = "2026-09-09";
+function nextRankingsRefresh() {
+  const cutoff = new Date(RANKINGS_REFRESH_CUTOFF + "T00:00:00");
+  const d = new Date(RANKINGS_UPDATED + "T00:00:00");
+  d.setDate(d.getDate() + (((3 - d.getDay() + 7) % 7) || 7));
+  return d > cutoff ? null : d;
+}
+function fmtRankDate(d) {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 function findNearby(name, spread) {
   const target = RANKINGS.find((p) => p.name.toLowerCase() === name.trim().toLowerCase());
   if (!target) return null;
@@ -869,6 +888,56 @@ function PickChoice({ options, value, onSelect }) {
     </div>
   );
 }
+function PlayerPicker({ value, onChange, onKeyDown, positionFilter, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = React.useRef(null);
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+  const q = (value || "").trim().toLowerCase();
+  const pool = positionFilter ? RANKINGS.filter((p) => p.pos === positionFilter) : RANKINGS;
+  const matches = (q ? pool.filter((p) => p.name.toLowerCase().includes(q)) : pool).slice(0, 30);
+  return (
+    <div className="player-picker" ref={wrapRef}>
+      <input
+        type="text"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+      />
+      {open && (
+        <div className="player-picker-list">
+          {matches.length === 0 ? (
+            <div className="player-picker-empty">No matching player — you can still type any name</div>
+          ) : (
+            matches.map((p) => (
+              <div
+                key={p.name}
+                className="player-picker-opt"
+                onClick={() => {
+                  onChange(p.name);
+                  setOpen(false);
+                }}
+              >
+                <span className="ppo-name">{p.name}</span>
+                <span className="ppo-rank">{p.pos}{p.rank}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 function BoardBetTracker() {
   const [bets, setBets] = useState([]);
   const [settlements, setSettlements] = useState([]);
@@ -899,8 +968,10 @@ function BoardBetTracker() {
   function formPickOptions() {
     if (form.category === "h2h" && form.playerA.trim() && form.playerB.trim())
       return [form.playerA.trim(), form.playerB.trim()];
-    if (form.category === "topx" && form.topPlayer.trim() && String(form.topX).trim())
-      return [`Top ${form.topX}`, `Not top ${form.topX}`];
+    if (form.category === "topx" && form.topPlayer.trim() && String(form.topX).trim()) {
+      const opts = [`Top ${form.topX}`, `Not top ${form.topX}`];
+      return form.topXNot ? opts.reverse() : opts;
+    }
     return null;
   }
   const fireIceMatchups = useMemo(() => {
@@ -1038,6 +1109,7 @@ function BoardBetTracker() {
       playerB: "",
       topPlayer: "",
       topX: "",
+      topXNot: false,
     });
   }
   function submitBet() {
@@ -1076,6 +1148,7 @@ function BoardBetTracker() {
       playerB: form.category === "h2h" ? form.playerB.trim() || null : null,
       topPlayer: form.category === "topx" ? form.topPlayer.trim() || null : null,
       topX: form.category === "topx" ? String(form.topX).trim() || null : null,
+      topXNot: form.category === "topx" ? !!form.topXNot : null,
     };
     persist([bet, ...bets], settlements);
     resetForm();
@@ -1324,6 +1397,14 @@ function BoardBetTracker() {
     .pick-choice-row { display:flex; gap:6px; flex:1; min-width:160px; }
     .pick-choice-btn { flex:1; padding:7px 8px; border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:#0A0A0A; color:#9A9A9A; font-size:12px; cursor:pointer; text-align:center; font-family:'Inter',sans-serif; }
     .pick-choice-btn.on { border-color:#FFD200; color:#FFD200; background:rgba(255,210,0,0.08); }
+    .player-picker { position:relative; }
+    .player-picker-list { position:absolute; z-index:20; top:calc(100% + 4px); left:0; right:0; max-height:230px; overflow-y:auto; background:#0F0F0F; border:1px solid rgba(255,255,255,0.16); border-radius:6px; box-shadow:0 8px 20px rgba(0,0,0,0.5); }
+    .player-picker-opt { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; cursor:pointer; font-size:13px; }
+    .player-picker-opt:hover { background:rgba(255,210,0,0.1); }
+    .player-picker-opt .ppo-name { color:#ECE7DA; }
+    .player-picker-opt .ppo-rank { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#9A9A9A; white-space:nowrap; }
+    .player-picker-empty { padding:8px 10px; font-size:12px; color:#5A5A5A; }
+    .rankings-note { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#6B6B6B; margin:-4px 0 12px; }
     .year-controls { display:flex; justify-content:flex-end; gap:8px; margin-bottom:10px; }
     .year-controls button { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; text-transform:uppercase; background:none; border:1px solid rgba(255,255,255,0.14); color:#9A9A9A; border-radius:4px; padding:5px 9px; cursor:pointer; }
     .year-controls button:hover { border-color:#FFD200; color:#FFD200; }
@@ -1369,6 +1450,7 @@ function BoardBetTracker() {
     .watch-item button { background:none; border:none; color:#5A5A5A; cursor:pointer; font-size:13px; padding:0 4px; }
     .watch-item button:hover { color:#E21833; }
     .watch-add-row { display:flex; gap:6px; }
+    .watch-add-row .player-picker { flex:1; }
     .watch-add-row input { flex:1; background:#0A0A0A; border:1px solid rgba(255,255,255,0.14); border-radius:5px; padding:7px 9px; color:#ECE7DA; font-size:13px; }
     .idea-input-row { display:flex; gap:8px; margin-top:6px; }
     .idea-input-row input { flex:1; background:#0F0F0F; border:1px solid rgba(255,255,255,0.14); border-radius:5px; padding:9px 10px; color:#ECE7DA; font-family:'Inter',sans-serif; font-size:14px; }
@@ -1438,22 +1520,6 @@ function BoardBetTracker() {
           </button>
         ))}
       </div>
-      <datalist id="idea-players">
-        {RANKINGS.map((p) => (
-          <option key={p.name} value={p.name}>
-            {p.pos}{p.rank}
-          </option>
-        ))}
-      </datalist>
-      {["QB", "RB", "WR", "TE"].map((pos) => (
-        <datalist id={"players-" + pos} key={pos}>
-          {RANKINGS.filter((p) => p.pos === pos).map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.pos}{p.rank}
-            </option>
-          ))}
-        </datalist>
-      ))}
       {tab === "active" && (
         <div>
           {staleActive.length > 0 && (
@@ -1974,12 +2040,10 @@ function BoardBetTracker() {
                         ))}
                       </div>
                       <div className="watch-add-row">
-                        <input
-                          type="text"
-                          list="idea-players"
+                        <PlayerPicker
                           placeholder="Add a player"
                           value={watchDraft[key] || ""}
-                          onChange={(e) => setWatchDraft({ ...watchDraft, [key]: e.target.value })}
+                          onChange={(v) => setWatchDraft({ ...watchDraft, [key]: v })}
                           onKeyDown={(e) => e.key === "Enter" && addWatch(p, kind)}
                         />
                         <button className="btn primary" onClick={() => addWatch(p, kind)}>
@@ -2109,17 +2173,22 @@ function BoardBetTracker() {
               Freeform
             </button>
           </div>
+          {(form.category === "h2h" || form.category === "topx") && (
+            <div className="rankings-note">
+              FantasyPros .5 PPR ECR — last refreshed {fmtRankDate(new Date(RANKINGS_UPDATED + "T00:00:00"))}
+              {nextRankingsRefresh()
+                ? ` · next refresh ${fmtRankDate(nextRankingsRefresh())}`
+                : " · weekly refresh has ended for the season"}
+            </div>
+          )}
           {form.category === "h2h" && (
             <div className="two-col">
               <div>
                 <label>Player A</label>
-                <input
-                  type="text"
-                  list="idea-players"
+                <PlayerPicker
                   placeholder="e.g. Josh Allen"
                   value={form.playerA}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onChange={(v) => {
                     const title = v && form.playerB ? `${v} vs ${form.playerB}` : form.title;
                     setForm({ ...form, playerA: v, title, sides: resetSidesPicks(form.sides) });
                   }}
@@ -2127,13 +2196,11 @@ function BoardBetTracker() {
               </div>
               <div>
                 <label>Player B</label>
-                <input
-                  type="text"
-                  list={playerAMatch ? "players-" + playerAMatch.pos : "idea-players"}
+                <PlayerPicker
                   placeholder="e.g. Lamar Jackson"
+                  positionFilter={playerAMatch ? playerAMatch.pos : null}
                   value={form.playerB}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onChange={(v) => {
                     const title = form.playerA && v ? `${form.playerA} vs ${v}` : form.title;
                     setForm({ ...form, playerB: v, title, sides: resetSidesPicks(form.sides) });
                   }}
@@ -2145,14 +2212,11 @@ function BoardBetTracker() {
             <div className="two-col">
               <div>
                 <label>Player</label>
-                <input
-                  type="text"
-                  list="idea-players"
+                <PlayerPicker
                   placeholder="e.g. Ladd McConkey"
                   value={form.topPlayer}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    const title = v && form.topX ? `${v} — top ${form.topX}?` : form.title;
+                  onChange={(v) => {
+                    const title = topXTitle(v, form.topX, form.topXNot) || form.title;
                     setForm({ ...form, topPlayer: v, title, sides: resetSidesPicks(form.sides) });
                   }}
                 />
@@ -2165,12 +2229,37 @@ function BoardBetTracker() {
                   value={form.topX}
                   onChange={(e) => {
                     const v = e.target.value;
-                    const title = form.topPlayer && v ? `${form.topPlayer} — top ${v}?` : form.title;
+                    const title = topXTitle(form.topPlayer, v, form.topXNot) || form.title;
                     setForm({ ...form, topX: v, title, sides: resetSidesPicks(form.sides) });
                   }}
                 />
               </div>
             </div>
+          )}
+          {form.category === "topx" && (
+            <>
+              <label>Direction</label>
+              <div className="mode-toggle">
+                <button
+                  className={!form.topXNot ? "on" : ""}
+                  onClick={() => {
+                    const title = topXTitle(form.topPlayer, form.topX, false) || form.title;
+                    setForm({ ...form, topXNot: false, title, sides: resetSidesPicks(form.sides) });
+                  }}
+                >
+                  Top X
+                </button>
+                <button
+                  className={form.topXNot ? "on" : ""}
+                  onClick={() => {
+                    const title = topXTitle(form.topPlayer, form.topX, true) || form.title;
+                    setForm({ ...form, topXNot: true, title, sides: resetSidesPicks(form.sides) });
+                  }}
+                >
+                  NOT Top X
+                </button>
+              </div>
+            </>
           )}
           <label>Bet</label>
           <input
