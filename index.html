@@ -999,6 +999,7 @@ function BoardBetTracker() {
             if (!seen.has(key)) {
               seen.add(key);
               matches.push({
+                key,
                 type: "h2h",
                 playerA: a.name,
                 personA: pA,
@@ -1020,7 +1021,7 @@ function BoardBetTracker() {
             const key = "clash::" + name.toLowerCase() + "::" + pFire + "::" + pIce;
             if (!seen.has(key)) {
               seen.add(key);
-              matches.push({ type: "clash", name, firePerson: pFire, icePerson: pIce });
+              matches.push({ key, type: "clash", name, firePerson: pFire, icePerson: pIce });
             }
           }
         });
@@ -1036,7 +1037,6 @@ function BoardBetTracker() {
         playerA: m.playerA,
         playerB: m.playerB,
         title: `${m.playerA} vs ${m.playerB}`,
-        note: `${m.personA} is high on ${m.playerA} (🔥), ${m.personB} is high on ${m.playerB} (🔥).`,
         sides: resetSidesPicks(f.sides),
       }));
     } else {
@@ -1046,7 +1046,6 @@ function BoardBetTracker() {
         playerA: m.name,
         playerB: "",
         title: `${m.name} — buy or fade?`,
-        note: `${m.firePerson} is high on him (🔥), ${m.icePerson} wants to fade (❄️).`,
         sides: resetSidesPicks(f.sides),
       }));
     }
@@ -1083,6 +1082,8 @@ function BoardBetTracker() {
       .catch(() => setSaveError("Couldn't save — try again."));
   }
   const [watchDraft, setWatchDraft] = useState({});
+  const [ideasOpen, setIdeasOpen] = useState(false);
+  const [dismissedIdeas, setDismissedIdeas] = useState(() => new Set());
   function addWatch(person, kind) {
     const key = person + "::" + kind;
     const name = (watchDraft[key] || "").trim();
@@ -1522,6 +1523,8 @@ function BoardBetTracker() {
     .idea-watch-tag { font-family:'IBM Plex Mono',monospace; font-size:9.5px; letter-spacing:0.5px; border-radius:3px; padding:1px 5px; margin-left:6px; }
     .idea-watch-tag.fire { background:rgba(255,107,74,0.18); color:#FF6B4A; }
     .idea-watch-tag.ice { background:rgba(111,211,255,0.18); color:#6FD3FF; }
+    .idea-dismiss-btn { background:none; border:none; color:#5A5A5A; cursor:pointer; font-size:14px; padding:0 6px; }
+    .idea-dismiss-btn:hover { color:#E21833; }
   `;
   if (loading) {
     return (
@@ -2119,34 +2122,53 @@ function BoardBetTracker() {
           </div>
         </div>
       )}
-      {tab === "propose" && (
+      {tab === "propose" && (() => {
+        const visibleIdeas = fireIceMatchups.filter((m) => !dismissedIdeas.has(m.key));
+        return (
         <div>
-          {fireIceMatchups.length > 0 && (
+          {visibleIdeas.length > 0 && (
             <div className="card">
-              <p className="section-label">Need an idea?</p>
-              <div className="idea-nearby-list">
-                <div className="bet-meta">Straight from Ice & Fire — someone's high, someone's fading:</div>
-                {fireIceMatchups.map((m, i) => (
-                  <div className="idea-nearby-row" key={i}>
-                    {m.type === "h2h" ? (
-                      <span>
-                        <span className="idea-nearby-name">{m.playerA} vs {m.playerB}</span>
-                        <span className="idea-watch-tag fire">🔥 {m.personA}</span>
-                        <span className="idea-watch-tag fire">🔥 {m.personB}</span>
-                      </span>
-                    ) : (
-                      <span>
-                        <span className="idea-nearby-name">{m.name}</span>
-                        <span className="idea-watch-tag fire">🔥 {m.firePerson}</span>
-                        <span className="idea-watch-tag ice">❄️ {m.icePerson}</span>
-                      </span>
-                    )}
-                    <button className="btn primary" onClick={() => useMatchupIdea(m)}>
-                      {m.type === "h2h" ? "Start bet — both picks filled in" : "Start bet"}
-                    </button>
-                  </div>
-                ))}
+              <div className="year-header" onClick={() => setIdeasOpen(!ideasOpen)}>
+                <span className={"year-chevron" + (ideasOpen ? " open" : "")}>▸</span>
+                <p className="section-label" style={{ margin: 0, flex: 1 }}>Need an idea?</p>
+                <span className="year-count">({visibleIdeas.length})</span>
               </div>
+              {ideasOpen && (
+                <div className="idea-nearby-list">
+                  <div className="bet-meta">Straight from Ice & Fire — someone's high, someone's fading:</div>
+                  {visibleIdeas.map((m) => (
+                    <div className="idea-nearby-row" key={m.key}>
+                      {m.type === "h2h" ? (
+                        <span>
+                          <span className="idea-nearby-name">{m.playerA} vs {m.playerB}</span>
+                          <span className="idea-watch-tag fire">🔥 {m.personA}</span>
+                          <span className="idea-watch-tag fire">🔥 {m.personB}</span>
+                        </span>
+                      ) : (
+                        <span>
+                          <span className="idea-nearby-name">{m.name}</span>
+                          <span className="idea-watch-tag fire">🔥 {m.firePerson}</span>
+                          <span className="idea-watch-tag ice">❄️ {m.icePerson}</span>
+                        </span>
+                      )}
+                      <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                        <button className="btn primary" onClick={() => useMatchupIdea(m)}>
+                          {m.type === "h2h" ? "Start bet — both picks filled in" : "Start bet"}
+                        </button>
+                        <button
+                          className="idea-dismiss-btn"
+                          title="Dismiss this suggestion"
+                          onClick={() =>
+                            setDismissedIdeas((prev) => new Set(prev).add(m.key))
+                          }
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {proposedBets.length > 0 && (
@@ -2459,7 +2481,8 @@ function BoardBetTracker() {
           </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
