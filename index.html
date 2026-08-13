@@ -1,0 +1,2096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Board — BoardBet Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#0A0A0A; }
+  #root { min-height:100vh; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ---- Firebase config ----
+// Fill this in with the config from your Firebase project
+// (Project settings -> General -> Your apps -> SDK setup and configuration -> Config).
+// This is safe to leave visible in the page; Firestore security rules control access, not this key.
+const firebaseConfig = {
+  apiKey: "AIzaSyCSTZsIzMYyXdPJgqimZCHIuq-wkkUDbLQ",
+  authDomain: "board-bet.firebaseapp.com",
+  projectId: "board-bet",
+  storageBucket: "board-bet.firebasestorage.app",
+  messagingSenderId: "717319213376",
+  appId: "1:717319213376:web:d4b4851d7302770aed6aa5",
+};
+firebase.initializeApp(firebaseConfig);
+const boardDocRef = firebase.firestore().collection("boardbets").doc("shared");
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+const PEOPLE = ["Josh", "Adam", "Sangeet"];
+const PERSON_COLOR = {
+  Josh: "#FFD200",
+  Adam: "#E21833",
+  Sangeet: "#F2F2F2",
+};
+const PERSON_TEXT_ON_CHIP = {
+  Josh: "#000000",
+  Adam: "#FFFFFF",
+  Sangeet: "#000000",
+};
+const STORAGE_KEY = "boardbets:data";
+function defaultSeason() {
+  const d = new Date();
+  const y = d.getFullYear();
+  return d.getMonth() < 2 ? String(y - 1) : String(y);
+}
+const emptySides = () => ({
+  Josh: { in: true, pick: "" },
+  Adam: { in: true, pick: "" },
+  Sangeet: { in: true, pick: "" },
+});
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+// Historical bets reconstructed from the old sheet (2016-2022).
+// Tuple format: [title, season, SangeetSlot, AdamSlot, JoshSlot]
+// Each slot is null (sat out) or [pick, outcome].
+const HIST_RESOLVED = [
+  ["AJ Green over Dez", "2016", ["AJ Green", "loss"], ["Dez", "win"], ["AJ Green", "loss"]],
+  ["Julio over Odell", "2016", ["Julio", "loss"], ["Odell", "win"], ["Julio", "loss"]],
+  ["Cobb over Demaryius", "2016", ["Demaryius", "win"], ["Cobb", "loss"], ["Demaryius", "win"]],
+  ["Eli over Rivers", "2016", ["Rivers", "win"], ["Eli", "loss"], ["Eli", "loss"]],
+  ["Stewart over Rawls", "2016", ["Rawls", "loss"], ["Stewart", "win"], ["Rawls", "loss"]],
+  ["Moncrief over Floyd", "2016", ["Moncrief", "win"], ["Floyd", "loss"], ["Moncrief", "win"]],
+  ["Zeke over Lamar", "2016", ["Lamar", "loss"], ["Zeke", "win"], ["Lamar", "loss"]],
+  ["Devonta not top 10", "2016", ["Not top 10", "loss"], ["Top 10", "win"], ["Not top 10", "loss"]],
+  ["Kirk top 10", "2016", ["Not top 10", "loss"], ["Not top 10", "loss"], ["Top 10", "win"]],
+  ["Lamar over AP", "2016", ["Lamar", "win"], ["AP", "loss"], ["Lamar", "win"]],
+  ["Alshon over Dez", "2016", ["Alshon", "loss"], ["Dez", "win"], ["Dez", "win"]],
+  ["Thomas/Sharpe over Sterling Shepard", "2016", ["Thomas/Sharpe", "win"], ["Sterling", "loss"], ["Sharpe", "win"]],
+  ["Buck Allen top Ravens RB fantasy pts", "2016", ["Not leader", "win"], ["Leader", "loss"], ["Not leader", "win"]],
+  ["Allen over Ertz", "2016", ["Allen", "loss"], ["Ertz", "win"], ["Ertz", "win"]],
+  ["Gates over Allen", "2016", ["Allen", "loss"], ["Gates", "win"], ["Allen", "loss"]],
+  ["Demaryius over Cooks", "2016", ["Demaryius", "loss"], ["Cooks", "win"], ["Cooks", "win"]],
+  ["Gurley not top 4", "2016", ["Not top 4", "win"], ["Not top 4", "win"], ["Top 4", "loss"]],
+  ["Sangeet record > Josh record", "2016", ["Sangeet", "loss"], ["Josh", "win"], ["Josh", "win"]],
+  ["Hill over CJA", "2016", ["CJA", "loss"], ["Hill", "win"], ["CJA", "loss"]],
+  ["Hill over Rawls", "2016", ["Rawls", "loss"], ["Hill", "win"], ["Rawls", "loss"]],
+  ["Cooks over Alshon", "2016", ["Alshon", "loss"], ["Cooks", "win"], ["Alshon", "loss"]],
+  ["Latavius over Rawls", "2016", ["Latavius", "win"], ["Latavius", "win"], ["Rawls", "loss"]],
+  ["Latavius over CJA", "2016", ["Latavius", "win"], ["Latavius", "win"], ["CJA", "loss"]],
+  ["Michael Floyd over Fitz", "2016", ["Floyd", "loss"], ["Fitz", "win"], ["Floyd", "loss"]],
+  ["Lacy over Martin", "2016", ["Lacy", "loss"], ["Martin", "win"], ["Martin", "win"]],
+  ["Ingram over Martin", "2016", ["Ingram", "win"], ["Martin", "loss"], ["Martin", "loss"]],
+  ["Shady over Martin", "2016", ["Shady", "win"], ["Martin", "loss"], ["Shady", "win"]],
+  ["Moncrief over Marvin Jones", "2016", ["Moncrief", "loss"], ["Marvin Jones", "win"], ["Moncrief", "loss"]],
+  ["Foster 5+ receptions wk1", "2016", ["5+ receptions", "loss"], ["Less than 5", "win"], null],
+  ["Ryan Matthews over Hill", "2016", null, ["Hill", "win"], ["Matthews", "loss"]],
+  ["Ryan Matthews top 18", "2016", ["Not top 18", "win"], ["Not top 18", "win"], ["Top 18", "loss"]],
+  ["Shady over Latavius", "2016", ["Latavius", "loss"], ["Latavius", "loss"], ["Shady", "win"]],
+  ["Shady over Ingram", "2016", ["Ingram", "loss"], ["Ingram", "loss"], ["Shady", "win"]],
+  ["Hopkins over AJ Green", "2016", ["AJ Green", "win"], ["Hopkins", "loss"], ["Hopkins", "loss"]],
+  ["Tajae Sharpe top 30", "2016", ["Not top 30", "loss"], null, ["Top 30", "win"]],
+  ["Will Fuller top 30", "2016", ["Not top 30", "win"], null, ["Top 30", "loss"]],
+  ["Marcus Wheaton top 30", "2016", ["Not top 30", "win"], ["Not top 30", "win"], ["Top 30", "loss"]],
+  ["Latavius not top 20", "2016", ["Top 20", "win"], ["Top 20", "win"], ["Not top 20", "loss"]],
+  ["Hill not top 20", "2016", null, ["Top 20", "win"], ["Not top 20", "loss"]],
+  ["Dion Lewis top 35", "2016", ["Not top 35", "win"], ["Not top 35", "win"], ["Top 35", "loss"]],
+  ["Foster top 25", "2016", ["Top 25", "loss"], ["Not top 25", "win"], ["Top 25", "loss"]],
+  ["Broncos/Chargers Wk6 spread", "2016", ["Broncos -3.5", "loss"], ["Chargers +3.5", "win"], null],
+  ["Martavis Bryant top 15 WR", "2017", ["Top 15", "loss"], ["Not top 15", "win"], null],
+  ["Hoyer over Eli", "2017", ["Eli", "win"], ["Hoyer", "loss"], null],
+  ["Cook over Mixon", "2017", ["Cook", "loss"], ["Mixon", "win"], null],
+  ["Doug Martin over Mixon (avg pts/wk)", "2017", ["Martin", "loss"], ["Mixon", "win"], null],
+  ["Martavis over Fitz", "2017", ["Martavis", "loss"], ["Fitz", "win"], null],
+  ["Kelce over Gronk", "2018", ["Gronk", "loss"], ["Kelce", "win"], null],
+  ["Zeke over Bell", "2018", ["Bell", "loss"], ["Zeke", "win"], null],
+  ["Juju over Cooper", "2018", ["Cooper", "loss"], ["Juju", "win"], ["Juju", "win"]],
+  ["Luck top 6", "2018", ["Top 6", "win"], ["Not top 6", "loss"], null],
+  ["Keelan Cole over Gallup", "2018", ["Cole", "loss"], ["Gallup", "win"], ["Cole", "loss"]],
+  ["Devonta Freeman over McCaffrey", "2018", ["Freeman", "loss"], ["McCaffrey", "win"], ["McCaffrey", "win"]],
+  ["McCaffrey over Fournette", "2018", ["Fournette", "loss"], ["McCaffrey", "win"], null],
+  ["Miller over Drake", "2018", ["Miller", "loss"], ["Drake", "win"], ["Miller", "loss"]],
+  ["Julio over Odell", "2018", ["Odell", "loss"], ["Julio", "win"], null],
+  ["Doyle over Engram", "2018", ["Engram", "win"], ["Doyle", "loss"], null],
+  ["Doyle over Rudolph", "2018", ["Rudolph", "win"], ["Doyle", "loss"], null],
+  ["Mike Williams over Lockett", "2018", ["M. Williams", "loss"], ["Lockett", "win"], ["Lockett", "win"]],
+  ["Mike Williams over Gallup", "2018", ["M. Williams", "win"], ["Gallup", "loss"], null],
+  ["Keenan Allen over Devonta Freeman", "2018", ["Freeman", "loss"], ["Allen", "win"], null],
+  ["Lynch over Hyde", "2018", ["Lynch", "loss"], ["Hyde", "win"], ["Hyde", "win"]],
+  ["Lynch over Burkhead", "2018", ["Lynch", "win"], ["Burkhead", "loss"], ["Burkhead", "loss"]],
+  ["Lamar over Burkhead", "2018", ["Lamar", "win"], ["Burkhead", "loss"], ["Lamar", "win"]],
+  ["Garoppolo over Roethlisberger", "2018", ["Roethlisberger", "win"], ["Garoppolo", "loss"], null],
+  ["Luck over Kirk", "2018", ["Luck", "win"], null, ["Kirk", "loss"]],
+  ["TY over Diggs", "2018", ["TY", "loss"], null, ["Diggs", "win"]],
+  ["Russ over Rodgers", "2018", ["Rodgers", "win"], ["Russ", "loss"], null],
+  ["Kamara over Melvin Gordon", "2018", ["Gordon", "loss"], ["Kamara", "win"], null],
+  ["Royce Freeman vs Mack wk6", "2018", ["Mack", "win"], ["Freeman", "loss"], null],
+  ["Chris Carson vs Mark Ingram wk11", "2018", ["Carson", "loss"], ["Ingram", "win"], ["Ingram", "win"]],
+  ["Lamar over Winston", "2019", ["Lamar", "win"], ["Winston", "loss"], ["Winston", "loss"]],
+  ["Kupp 50% over field (Golladay/Godwin/Arob/Ridley/M.Williams)", "2019", ["Kupp", "loss"], ["Not Kupp", "win"], null],
+  ["Sony over Montgomery", "2019", ["Sony", "loss"], ["Montgomery", "win"], ["Montgomery", "win"]],
+  ["AB vs Mike Evans", "2019", ["AB", "loss"], ["Mike Evans", "win"], ["Mike Evans", "win"]],
+  ["Allison vs MVS", "2019", ["Allison", "loss"], ["MVS", "win"], null],
+  ["Dede vs Kirk", "2019", ["Dede", "loss"], ["Kirk", "win"], ["Kirk", "win"]],
+  ["Carson over Cook", "2019", ["Carson", "loss"], ["Cook", "win"], ["Cook", "win"]],
+  ["Kamara vs CMC", "2019", ["Kamara", "loss"], ["CMC", "win"], ["CMC", "win"]],
+  ["Godwin over Kupp", "2019", ["Kupp", "loss"], null, ["Godwin", "win"]],
+  ["McLaurin vs DK Metcalf (wk2 on)", "2019", ["McLaurin", "loss"], null, ["Metcalf", "win"]],
+  ["Josh Allen Top 8 QB", "2019", ["Yes", "win"], null, ["No", "loss"]],
+  ["Pittman vs DJ Moore", "2022", ["Pittman", "win"], ["Moore", "loss"], ["Pittman", "win"]],
+  ["Woods vs London", "2022", ["Woods", "loss"], ["London", "win"], null],
+  ["Metcalf vs Juju", "2022", ["Metcalf", "win"], ["Juju", "loss"], null],
+  ["Diontae vs Juju", "2022", ["Diontae", "loss"], ["Juju", "win"], null],
+  ["Andre Johnson Top 20 WR", "2015", ["Top 20", "loss"], ["Not top 20", "win"], null],
+  ["Olsen over Kelce", "2015", ["Kelce", "loss"], ["Olsen", "win"], ["Kelce", "loss"]],
+  ["Olsen over Graham", "2015", null, ["Olsen", "win"], ["Graham", "loss"]],
+  ["Brown over Fitz", "2015", null, ["Brown", "loss"], ["Fitz", "win"]],
+  ["Julio top 2 WR", "2015", ["Top 2", "win"], ["Not top 2", "loss"], ["Not top 2", "loss"]],
+  ["Peterson not top 5 RB", "2015", ["Top 5", "win"], ["Not top 5", "loss"], ["Top 5", "win"]],
+  ["Decker Top 28 WR", "2015", null, ["Top 28", "win"], ["Not top 28", "loss"]],
+  ["Owen Daniels Top 8 TE", "2015", null, ["Top 8", "loss"], ["Not top 8", "win"]],
+  ["Vernon Davis Top 15 TE", "2015", null, ["Top 15", "loss"], ["Not top 15", "win"]],
+  ["Gore top 12 RB", "2015", ["Top 12", "loss"], ["Not top 12", "win"], null],
+  ["Lamar Miller Top 8 RB", "2015", ["Top 8", "win"], ["Not top 8", "loss"], null],
+  ["Abdullah not top 24 RB", "2015", ["Not top 24", "win"], null, ["Top 24", "loss"]],
+  ["VJax not top 28", "2015", ["Not top 28", "win"], ["Not top 28", "win"], ["Top 28", "loss"]],
+  ["Roethlisberger not top 8", "2015", ["Top 8", "loss"], ["Not top 8", "win"], ["Top 8", "loss"]],
+  ["McFadden Top 25", "2015", ["Not top 25", "loss"], ["Top 25", "win"], ["Not top 25", "loss"]],
+  ["Rams make the playoffs", "2015", null, ["Yes", "loss"], ["No", "win"]],
+  ["Romo over Brees", "2015", ["Brees", "win"], ["Romo", "loss"], ["Brees", "win"]],
+  ["Calvin Johnson Top 3", "2015", ["Not top 3", "win"], ["Not top 3", "win"], ["Top 3", "loss"]],
+  ["Cobb Top 6", "2015", ["Not top 6", "win"], ["Top 6", "loss"], ["Not top 6", "win"]],
+  ["AJ Green Top 5", "2015", ["Not top 5", "win"], ["Not top 5", "win"], ["Top 5", "loss"]],
+  ["Jordan Matthews Top 10", "2015", null, ["Not top 10", "win"], ["Top 10", "loss"]],
+  ["Kirk Cousins Top 20", "2015", ["Not top 20", "loss"], null, ["Top 20", "win"]],
+  ["Luck over Rodgers", "2015", null, ["Rodgers", "win"], ["Luck", "loss"]],
+  ["Khiry Robinson top 35", "2015", ["Not top 35", "win"], null, ["Top 35", "loss"]],
+  ["Foster top 20", "2015", null, ["Not top 20", "win"], ["Top 20", "loss"]],
+  ["Lynch over Peterson", "2015", ["Peterson", "win"], ["Lynch", "loss"], ["Peterson", "win"]],
+  ["Lacy over Peterson", "2015", null, ["Lacy", "loss"], ["Peterson", "win"]],
+  ["Demarco over Shady", "2015", ["Demarco", "loss"], ["Demarco", "loss"], ["Shady", "win"]],
+  ["Forsett top 17", "2015", ["Top 17", "loss"], ["Not top 17", "win"], ["Top 17", "loss"]],
+  ["Colts end 14-2 or higher", "2015", ["Yes", "loss"], ["No", "win"], ["No", "win"]],
+  ["Foster per-game top 8", "2015", null, ["Not top 8", "loss"], ["Top 8", "win"]],
+  ["Latavius over Hyde", "2015", ["Latavius", "win"], ["Hyde", "loss"], ["Latavius", "win"]],
+  ["Blount over Gordon", "2015", ["Blount", "win"], ["Gordon", "loss"], ["Blount", "win"]],
+  ["Blount over Martin", "2015", ["Martin", "win"], ["Blount", "loss"], ["Blount", "loss"]],
+  ["Decker over Marshall", "2015", ["Marshall", "win"], ["Decker", "loss"], ["Marshall", "win"]],
+  ["Matthews over Alshon", "2015", ["Matthews", "win"], ["Alshon", "loss"], ["Matthews", "win"]],
+  ["Cooks over Alshon", "2015", ["Alshon", "loss"], ["Alshon", "loss"], ["Cooks", "win"]],
+  ["Amari Cooper top 24", "2015", null, ["Not top 24", "loss"], ["Top 24", "win"]],
+  ["Allen Robinson over John Brown", "2015", ["Robinson", "win"], ["Brown", "loss"], ["Robinson", "win"]],
+  ["Jarvis Landry over John Brown", "2015", ["Landry", "win"], ["Brown", "loss"], ["Landry", "win"]],
+  ["Martavis top 20, wk5 on", "2015", ["Not top 20", "loss"], ["Not top 20", "loss"], ["Top 20", "win"]],
+  ["DeAngelo vs McFadden wk9-16 avg", "2015", ["DeAngelo", "win"], ["McFadden", "loss"], ["DeAngelo", "win"]],
+  ["Cutler vs Tyrod wk9", "2015", ["Cutler", "win"], null, ["Tyrod", "loss"]],
+];
+// [title, season, voidReason]
+const HIST_VOID = [
+  ["Bruce Ellington top 30", "2016", "No result recorded"],
+  ["Romo top 10", "2016", "Romo missed the season (injury)"],
+  ["Luck top 3", "2016", "No counterparty accepted"],
+  ["Baldwin not top 20", "2016", "No counterparty accepted"],
+  ["Josh Gordon over Corey Coleman", "2016", "No counterparty accepted"],
+  ["Lamar top 3", "2016", "No result recorded"],
+  ["Shady over Lacy", "2016", "No counterparty accepted"],
+  ["Shady over Charles", "2016", "No counterparty accepted"],
+  ["Hopkins over Dez", "2016", "No counterparty accepted"],
+  ["Ware over Rawls", "2016", "No counterparty accepted"],
+  ["Julio vs Thomas vs Adams", "2019", "Adams missed 4 games (turf toe) and lost — void per 3-game rule"],
+  ["Shady vs Breida", "2019", "Breida missed 3 games and lost — void per 3-game rule"],
+  ["Josh Gordon vs Kirk", "2019", "Gordon missed 5 games and lost — void per 3-game rule"],
+  ["Hunter vs Ingram vs OJ", "2019", "Only one pick recorded, no counterparty"],
+  ["Arob vs Gabe Davis", "2022", "Arob missed 7 games and lost — void per 3-game rule"],
+  ["Taylor vs CMC", "2022", "Taylor missed 5 games and lost — void per 3-game rule"],
+  ["Kmet vs Goedert", "2022", "Goedert missed 5 games and lost — void per 3-game rule"],
+  ["Sangeet vs Ak, both leagues overall finish ($50)", "2022", "Cancelled / called off"],
+  ["Bradford top 10, barring 2+ games missed", "2015", "No counterparty accepted"],
+];
+function buildHistoricalBets() {
+  const out = [];
+  HIST_RESOLVED.forEach(([title, season, s, a, j], i) => {
+    const sides = {};
+    const outcomes = {};
+    [["Sangeet", s], ["Adam", a], ["Josh", j]].forEach(([p, val]) => {
+      if (val) {
+        sides[p] = { in: true, pick: val[0], accepted: true };
+        outcomes[p] = val[1];
+      } else {
+        sides[p] = { in: false, pick: "SKIP", accepted: true };
+      }
+    });
+    out.push({
+      id: "hist-r-" + i,
+      title,
+      note: "",
+      createdBy: "Import",
+      createdAt: new Date(season + "-09-01").toISOString(),
+      season,
+      stake: null,
+      status: "resolved",
+      sides,
+      voidReason: null,
+      outcomes,
+      settled: true,
+    });
+  });
+  HIST_VOID.forEach(([title, season, reason], i) => {
+    const sides = {
+      Sangeet: { in: true, pick: "—", accepted: true },
+      Adam: { in: true, pick: "—", accepted: true },
+      Josh: { in: true, pick: "—", accepted: true },
+    };
+    out.push({
+      id: "hist-v-" + i,
+      title,
+      note: "",
+      createdBy: "Import",
+      createdAt: new Date(season + "-09-01").toISOString(),
+      season,
+      stake: null,
+      status: "void",
+      sides,
+      voidReason: reason,
+      outcomes: {},
+      settled: false,
+    });
+  });
+  return out;
+}
+function pairLoop(bet, fn) {
+  const inPeople = PEOPLE.filter((p) => bet.sides[p]?.in);
+  for (let i = 0; i < inPeople.length; i++) {
+    for (let j = 0; j < inPeople.length; j++) {
+      if (i === j) continue;
+      fn(inPeople[i], inPeople[j]);
+    }
+  }
+}
+// Snapshot of FantasyPros' half-PPR Expert Consensus overall rankings
+// (https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php),
+// captured directly from the live page on August 12, 2026. QB/RB/WR/TE only.
+// This is a point-in-time snapshot, not a live feed — ask Claude to re-pull it later in the season.
+const RANKINGS = [
+  { name: "Jahmyr Gibbs", pos: "RB", rank: 1 },
+  { name: "Bijan Robinson", pos: "RB", rank: 2 },
+  { name: "Ja\'Marr Chase", pos: "WR", rank: 1 },
+  { name: "Puka Nacua", pos: "WR", rank: 2 },
+  { name: "Jaxon Smith-Njigba", pos: "WR", rank: 3 },
+  { name: "Amon-Ra St. Brown", pos: "WR", rank: 4 },
+  { name: "Christian McCaffrey", pos: "RB", rank: 3 },
+  { name: "Jonathan Taylor", pos: "RB", rank: 4 },
+  { name: "CeeDee Lamb", pos: "WR", rank: 5 },
+  { name: "James Cook III", pos: "RB", rank: 5 },
+  { name: "Justin Jefferson", pos: "WR", rank: 6 },
+  { name: "Ashton Jeanty", pos: "RB", rank: 6 },
+  { name: "Drake London", pos: "WR", rank: 7 },
+  { name: "Chase Brown", pos: "RB", rank: 7 },
+  { name: "A.J. Brown", pos: "WR", rank: 8 },
+  { name: "Saquon Barkley", pos: "RB", rank: 8 },
+  { name: "Brock Bowers", pos: "TE", rank: 1 },
+  { name: "De\'Von Achane", pos: "RB", rank: 9 },
+  { name: "Omarion Hampton", pos: "RB", rank: 10 },
+  { name: "Nico Collins", pos: "WR", rank: 9 },
+  { name: "Derrick Henry", pos: "RB", rank: 11 },
+  { name: "George Pickens", pos: "WR", rank: 10 },
+  { name: "Kenneth Walker III", pos: "RB", rank: 12 },
+  { name: "Trey McBride", pos: "TE", rank: 2 },
+  { name: "Chris Olave", pos: "WR", rank: 11 },
+  { name: "Rashee Rice", pos: "WR", rank: 12 },
+  { name: "Josh Allen", pos: "QB", rank: 1 },
+  { name: "DeVonta Smith", pos: "WR", rank: 13 },
+  { name: "Zay Flowers", pos: "WR", rank: 14 },
+  { name: "Malik Nabers", pos: "WR", rank: 15 },
+  { name: "Kyren Williams", pos: "RB", rank: 13 },
+  { name: "Tee Higgins", pos: "WR", rank: 16 },
+  { name: "Tetairoa McMillan", pos: "WR", rank: 17 },
+  { name: "Emeka Egbuka", pos: "WR", rank: 18 },
+  { name: "Jeremiyah Love", pos: "RB", rank: 14 },
+  { name: "Lamar Jackson", pos: "QB", rank: 2 },
+  { name: "Breece Hall", pos: "RB", rank: 15 },
+  { name: "Josh Jacobs", pos: "RB", rank: 16 },
+  { name: "Garrett Wilson", pos: "WR", rank: 19 },
+  { name: "Ladd McConkey", pos: "WR", rank: 20 },
+  { name: "Javonte Williams", pos: "RB", rank: 17 },
+  { name: "Colston Loveland", pos: "TE", rank: 3 },
+  { name: "Jaylen Waddle", pos: "WR", rank: 21 },
+  { name: "Drake Maye", pos: "QB", rank: 3 },
+  { name: "Terry McLaurin", pos: "WR", rank: 22 },
+  { name: "Travis Etienne Jr.", pos: "RB", rank: 18 },
+  { name: "Davante Adams", pos: "WR", rank: 23 },
+  { name: "Luther Burden III", pos: "WR", rank: 24 },
+  { name: "Joe Burrow", pos: "QB", rank: 4 },
+  { name: "Cam Skattebo", pos: "RB", rank: 19 },
+  { name: "Bucky Irving", pos: "RB", rank: 20 },
+  { name: "Tyler Warren", pos: "TE", rank: 4 },
+  { name: "Jayden Daniels", pos: "QB", rank: 5 },
+  { name: "D\'Andre Swift", pos: "RB", rank: 21 },
+  { name: "Jameson Williams", pos: "WR", rank: 25 },
+  { name: "Quinshon Judkins", pos: "RB", rank: 22 },
+  { name: "Christian Watson", pos: "WR", rank: 26 },
+  { name: "David Montgomery", pos: "RB", rank: 23 },
+  { name: "Mike Evans", pos: "WR", rank: 27 },
+  { name: "DJ Moore", pos: "WR", rank: 28 },
+  { name: "Jalen Hurts", pos: "QB", rank: 6 },
+  { name: "Rome Odunze", pos: "WR", rank: 29 },
+  { name: "TreVeyon Henderson", pos: "RB", rank: 24 },
+  { name: "Bhayshul Tuten", pos: "RB", rank: 25 },
+  { name: "Jadarian Price", pos: "RB", rank: 26 },
+  { name: "Tucker Kraft", pos: "TE", rank: 5 },
+  { name: "Caleb Williams", pos: "QB", rank: 7 },
+  { name: "Justin Herbert", pos: "QB", rank: 8 },
+  { name: "Carnell Tate", pos: "WR", rank: 30 },
+  { name: "Jaylen Warren", pos: "RB", rank: 27 },
+  { name: "Marvin Harrison Jr.", pos: "WR", rank: 31 },
+  { name: "Parker Washington", pos: "WR", rank: 32 },
+  { name: "Tony Pollard", pos: "RB", rank: 28 },
+  { name: "DK Metcalf", pos: "WR", rank: 33 },
+  { name: "Brian Thomas Jr.", pos: "WR", rank: 34 },
+  { name: "Trevor Lawrence", pos: "QB", rank: 9 },
+  { name: "Rhamondre Stevenson", pos: "RB", rank: 29 },
+  { name: "Dak Prescott", pos: "QB", rank: 10 },
+  { name: "Sam LaPorta", pos: "TE", rank: 6 },
+  { name: "Chuba Hubbard", pos: "RB", rank: 30 },
+  { name: "Kyle Pitts Sr.", pos: "TE", rank: 7 },
+  { name: "Rico Dowdle", pos: "RB", rank: 31 },
+  { name: "Courtland Sutton", pos: "WR", rank: 35 },
+  { name: "Jordyn Tyson", pos: "WR", rank: 36 },
+  { name: "Alec Pierce", pos: "WR", rank: 37 },
+  { name: "Chris Godwin Jr.", pos: "WR", rank: 38 },
+  { name: "Harold Fannin Jr.", pos: "TE", rank: 8 },
+  { name: "J.K. Dobbins", pos: "RB", rank: 32 },
+  { name: "Jaxson Dart", pos: "QB", rank: 11 },
+  { name: "Michael Wilson", pos: "WR", rank: 39 },
+  { name: "RJ Harvey", pos: "RB", rank: 33 },
+  { name: "Michael Pittman Jr.", pos: "WR", rank: 40 },
+  { name: "Brock Purdy", pos: "QB", rank: 12 },
+  { name: "Kyle Monangai", pos: "RB", rank: 34 },
+  { name: "Quentin Johnston", pos: "WR", rank: 41 },
+  { name: "Blake Corum", pos: "RB", rank: 35 },
+  { name: "Josh Downs", pos: "WR", rank: 42 },
+  { name: "Bo Nix", pos: "QB", rank: 13 },
+  { name: "Patrick Mahomes II", pos: "QB", rank: 14 },
+  { name: "Makai Lemon", pos: "WR", rank: 43 },
+  { name: "Matthew Stafford", pos: "QB", rank: 15 },
+  { name: "Jonathon Brooks", pos: "RB", rank: 36 },
+  { name: "Wan\'Dale Robinson", pos: "WR", rank: 44 },
+  { name: "Travis Kelce", pos: "TE", rank: 9 },
+  { name: "George Kittle", pos: "TE", rank: 10 },
+  { name: "Jordan Addison", pos: "WR", rank: 45 },
+  { name: "Kenny Gainwell", pos: "RB", rank: 37 },
+  { name: "Jared Goff", pos: "QB", rank: 16 },
+  { name: "Jacory Croskey-Merritt", pos: "RB", rank: 38 },
+  { name: "Rachaad White", pos: "RB", rank: 39 },
+  { name: "Jayden Reed", pos: "WR", rank: 46 },
+  { name: "Jordan Mason", pos: "RB", rank: 40 },
+  { name: "Aaron Jones Sr.", pos: "RB", rank: 41 },
+  { name: "Kyler Murray", pos: "QB", rank: 17 },
+  { name: "Jakobi Meyers", pos: "WR", rank: 47 },
+  { name: "Dallas Goedert", pos: "TE", rank: 11 },
+  { name: "Baker Mayfield", pos: "QB", rank: 18 },
+  { name: "Dalton Kincaid", pos: "TE", rank: 12 },
+  { name: "Jake Ferguson", pos: "TE", rank: 13 },
+  { name: "Jordan Love", pos: "QB", rank: 19 },
+  { name: "Tyler Shough", pos: "QB", rank: 20 },
+  { name: "Jayden Higgins", pos: "WR", rank: 48 },
+  { name: "Xavier Worthy", pos: "WR", rank: 49 },
+  { name: "Tyrone Tracy Jr.", pos: "RB", rank: 42 },
+  { name: "Jalen Coker", pos: "WR", rank: 50 },
+  { name: "Khalil Shakir", pos: "WR", rank: 51 },
+  { name: "Malik Willis", pos: "QB", rank: 21 },
+  { name: "Mark Andrews", pos: "TE", rank: 14 },
+  { name: "Tyler Allgeier", pos: "RB", rank: 43 },
+  { name: "Woody Marks", pos: "RB", rank: 44 },
+  { name: "KC Concepcion", pos: "WR", rank: 52 },
+  { name: "Isaiah Likely", pos: "TE", rank: 15 },
+  { name: "Chris Rodriguez Jr.", pos: "RB", rank: 45 },
+  { name: "Zach Charbonnet", pos: "RB", rank: 46 },
+  { name: "Stefon Diggs", pos: "WR", rank: 53 },
+  { name: "Romeo Doubs", pos: "WR", rank: 54 },
+  { name: "Matthew Golden", pos: "WR", rank: 55 },
+  { name: "Tyjae Spears", pos: "RB", rank: 47 },
+  { name: "C.J. Stroud", pos: "QB", rank: 22 },
+  { name: "Sam Darnold", pos: "QB", rank: 23 },
+  { name: "Alvin Kamara", pos: "RB", rank: 48 },
+  { name: "Juwan Johnson", pos: "TE", rank: 16 },
+  { name: "Isiah Pacheco", pos: "RB", rank: 49 },
+  { name: "Rashid Shaheed", pos: "WR", rank: 56 },
+  { name: "Keaton Mitchell", pos: "RB", rank: 50 },
+  { name: "Tank Bigsby", pos: "RB", rank: 51 },
+  { name: "Dylan Sampson", pos: "RB", rank: 52 },
+  { name: "Brian Robinson Jr.", pos: "RB", rank: 53 },
+  { name: "Hunter Henry", pos: "TE", rank: 17 },
+  { name: "Cam Ward", pos: "QB", rank: 24 },
+  { name: "Brenton Strange", pos: "TE", rank: 18 },
+  { name: "Chig Okonkwo", pos: "TE", rank: 19 },
+  { name: "Deebo Samuel Sr.", pos: "WR", rank: 57 },
+  { name: "Daniel Jones", pos: "QB", rank: 25 },
+  { name: "Oronde Gadsden II", pos: "TE", rank: 20 },
+  { name: "De\'Zhaun Stribling", pos: "WR", rank: 58 },
+  { name: "Bryce Young", pos: "QB", rank: 26 },
+  { name: "Jonah Coleman", pos: "RB", rank: 54 },
+  { name: "Denzel Boston", pos: "WR", rank: 59 },
+  { name: "Adonai Mitchell", pos: "WR", rank: 60 },
+  { name: "Jerry Jeudy", pos: "WR", rank: 61 },
+  { name: "Dalton Schultz", pos: "TE", rank: 21 },
+  { name: "Jalen McMillan", pos: "WR", rank: 62 },
+  { name: "Jauan Jennings", pos: "WR", rank: 63 },
+  { name: "Tre Tucker", pos: "WR", rank: 64 },
+  { name: "T.J. Hockenson", pos: "TE", rank: 22 },
+  { name: "Braelon Allen", pos: "RB", rank: 55 },
+  { name: "Omar Cooper Jr.", pos: "WR", rank: 65 },
+  { name: "AJ Barner", pos: "TE", rank: 23 },
+  { name: "Jacoby Brissett", pos: "QB", rank: 27 },
+  { name: "Tre\' Harris", pos: "WR", rank: 66 },
+  { name: "Sean Tucker", pos: "RB", rank: 56 },
+  { name: "Ray Davis", pos: "RB", rank: 57 },
+  { name: "Kimani Vidal", pos: "RB", rank: 58 },
+  { name: "Dontayvion Wicks", pos: "WR", rank: 67 },
+  { name: "Travis Hunter", pos: "WR", rank: 68 },
+  { name: "Ryan Flournoy", pos: "WR", rank: 69 },
+  { name: "Emmett Johnson", pos: "RB", rank: 59 },
+  { name: "Emanuel Wilson", pos: "RB", rank: 60 },
+  { name: "MarShawn Lloyd", pos: "RB", rank: 61 },
+  { name: "Kenyon Sadiq", pos: "TE", rank: 24 },
+  { name: "Kayshon Boutte", pos: "WR", rank: 70 },
+  { name: "Jalen Nailor", pos: "WR", rank: 71 },
+  { name: "Terrance Ferguson", pos: "TE", rank: 25 },
+  { name: "Malik Washington", pos: "WR", rank: 72 },
+  { name: "Nicholas Singleton", pos: "RB", rank: 62 },
+  { name: "Pat Bryant", pos: "WR", rank: 73 },
+  { name: "Gunnar Helm", pos: "TE", rank: 26 },
+  { name: "James Conner", pos: "RB", rank: 63 },
+  { name: "Geno Smith", pos: "QB", rank: 28 },
+  { name: "Mike Washington Jr.", pos: "RB", rank: 64 },
+  { name: "Isaac TeSlaa", pos: "WR", rank: 74 },
+  { name: "Calvin Ridley", pos: "WR", rank: 75 },
+  { name: "Rashod Bateman", pos: "WR", rank: 76 },
+  { name: "Jaylin Noel", pos: "WR", rank: 77 },
+  { name: "Troy Franklin", pos: "WR", rank: 78 },
+  { name: "Pat Freiermuth", pos: "TE", rank: 27 },
+  { name: "Cade Otton", pos: "TE", rank: 28 },
+  { name: "Jaydon Blue", pos: "RB", rank: 65 },
+  { name: "Kaytron Allen", pos: "RB", rank: 66 },
+  { name: "Darnell Mooney", pos: "WR", rank: 79 },
+  { name: "Aaron Rodgers", pos: "QB", rank: 29 },
+  { name: "Cooper Kupp", pos: "WR", rank: 80 },
+  { name: "Tank Dell", pos: "WR", rank: 81 },
+  { name: "Oscar Delp", pos: "TE", rank: 29 },
+  { name: "Jaylen Wright", pos: "RB", rank: 67 },
+  { name: "Fernando Mendoza", pos: "QB", rank: 30 },
+  { name: "Ollie Gordon II", pos: "RB", rank: 68 },
+  { name: "Evan Engram", pos: "TE", rank: 30 },
+  { name: "David Njoku", pos: "TE", rank: 31 },
+  { name: "Colby Parkinson", pos: "TE", rank: 32 },
+  { name: "George Holani", pos: "RB", rank: 69 },
+  { name: "Zachariah Branch", pos: "WR", rank: 82 },
+  { name: "Tua Tagovailoa", pos: "QB", rank: 31 },
+  { name: "Elic Ayomanor", pos: "WR", rank: 83 },
+  { name: "Keon Coleman", pos: "WR", rank: 84 },
+  { name: "Chimere Dike", pos: "WR", rank: 85 },
+  { name: "Tory Horton", pos: "WR", rank: 86 },
+  { name: "Jordan James", pos: "RB", rank: 70 },
+  { name: "Justice Hill", pos: "RB", rank: 71 },
+  { name: "Tyquan Thornton", pos: "WR", rank: 87 },
+  { name: "Isaiah Davis", pos: "RB", rank: 72 },
+  { name: "Chris Brooks", pos: "RB", rank: 73 },
+  { name: "Antonio Williams", pos: "WR", rank: 88 },
+  { name: "Demond Claiborne", pos: "RB", rank: 74 },
+  { name: "Germie Bernard", pos: "WR", rank: 89 },
+  { name: "Jack Bech", pos: "WR", rank: 90 },
+  { name: "Samaje Perine", pos: "RB", rank: 75 },
+  { name: "Christian Kirk", pos: "WR", rank: 91 },
+  { name: "DJ Giddens", pos: "RB", rank: 76 },
+  { name: "Darius Slayton", pos: "WR", rank: 92 },
+  { name: "Malachi Fields", pos: "WR", rank: 93 },
+  { name: "Eli Stowers", pos: "TE", rank: 33 },
+  { name: "Greg Dulcich", pos: "TE", rank: 34 },
+  { name: "Elijah Sarratt", pos: "WR", rank: 94 },
+  { name: "Malik Davis", pos: "RB", rank: 77 },
+  { name: "Devaughn Vele", pos: "WR", rank: 95 },
+  { name: "Mason Taylor", pos: "TE", rank: 35 },
+  { name: "Ty Johnson", pos: "RB", rank: 78 },
+  { name: "Marvin Mims Jr.", pos: "WR", rank: 96 },
+  { name: "LeQuint Allen Jr.", pos: "RB", rank: 79 },
+  { name: "Kirk Cousins", pos: "QB", rank: 32 },
+  { name: "Michael Penix Jr.", pos: "QB", rank: 33 },
+  { name: "Kaelon Black", pos: "RB", rank: 80 },
+  { name: "Xavier Legette", pos: "WR", rank: 97 },
+  { name: "Chris Bell", pos: "WR", rank: 98 },
+  { name: "Trey Benson", pos: "RB", rank: 81 },
+  { name: "Shedeur Sanders", pos: "QB", rank: 34 },
+  { name: "Ted Hurst III", pos: "WR", rank: 99 },
+  { name: "Deshaun Watson", pos: "QB", rank: 35 },
+  { name: "Emari Demercado", pos: "RB", rank: 82 },
+  { name: "Devin Neal", pos: "RB", rank: 83 },
+  { name: "Theo Johnson", pos: "TE", rank: 36 },
+  { name: "Keenan Allen", pos: "WR", rank: 100 },
+  { name: "Kaleb Johnson", pos: "RB", rank: 84 },
+  { name: "Hollywood Brown", pos: "WR", rank: 101 },
+  { name: "Devin Singletary", pos: "RB", rank: 85 },
+  { name: "Ja\'Kobi Lane", pos: "WR", rank: 102 },
+  { name: "Brashard Smith", pos: "RB", rank: 86 },
+  { name: "Kendre Miller", pos: "RB", rank: 87 },
+  { name: "Mike Gesicki", pos: "TE", rank: 37 },
+  { name: "Mack Hollins", pos: "WR", rank: 103 },
+  { name: "Jerome Ford", pos: "RB", rank: 88 },
+  { name: "Kyle Williams", pos: "WR", rank: 104 },
+  { name: "Adam Randall", pos: "RB", rank: 89 },
+  { name: "Brandon Aiyuk", pos: "WR", rank: 105 },
+  { name: "Isaiah Bond", pos: "WR", rank: 106 },
+  { name: "Najee Harris", pos: "RB", rank: 90 },
+  { name: "Seth McGowan", pos: "RB", rank: 91 },
+  { name: "Trevor Etienne", pos: "RB", rank: 92 },
+  { name: "Tahj Brooks", pos: "RB", rank: 93 },
+  { name: "Jarquez Hunter", pos: "RB", rank: 94 },
+  { name: "Isaac Guerendo", pos: "RB", rank: 95 },
+  { name: "Tyreek Hill", pos: "WR", rank: 107 },
+  { name: "Jaleel McLaughlin", pos: "RB", rank: 96 },
+  { name: "Caleb Douglas", pos: "WR", rank: 108 },
+  { name: "Jake Tonges", pos: "TE", rank: 38 },
+  { name: "Skyler Bell", pos: "WR", rank: 109 },
+  { name: "Audric Estime", pos: "RB", rank: 97 },
+  { name: "Cyrus Allen", pos: "WR", rank: 110 },
+  { name: "Andrei Iosivas", pos: "WR", rank: 111 },
+  { name: "Will Shipley", pos: "RB", rank: 98 },
+  { name: "Darnell Washington", pos: "TE", rank: 39 },
+  { name: "Kareem Hunt", pos: "RB", rank: 99 },
+  { name: "Cedric Tillman", pos: "WR", rank: 112 },
+  { name: "Calvin Austin III", pos: "WR", rank: 113 },
+  { name: "J.J. McCarthy", pos: "QB", rank: 36 },
+  { name: "Joe Mixon", pos: "RB", rank: 100 },
+  { name: "Luke McCaffrey", pos: "WR", rank: 114 },
+  { name: "Jahan Dotson", pos: "WR", rank: 115 },
+  { name: "Chris Brazzell II", pos: "WR", rank: 116 },
+  { name: "Jalen Tolbert", pos: "WR", rank: 117 },
+  { name: "Mac Jones", pos: "QB", rank: 37 },
+  { name: "Konata Mumpfield", pos: "WR", rank: 118 },
+  { name: "Carson Beck", pos: "QB", rank: 38 },
+  { name: "Tez Johnson", pos: "WR", rank: 119 },
+  { name: "DeMario Douglas", pos: "WR", rank: 120 },
+  { name: "Jalen Royals", pos: "WR", rank: 121 },
+  { name: "Michael Mayer", pos: "TE", rank: 40 },
+  { name: "Max Klare", pos: "TE", rank: 41 },
+  { name: "Erick All Jr.", pos: "TE", rank: 42 },
+  { name: "Bam Knight", pos: "RB", rank: 101 },
+  { name: "Cole Kmet", pos: "TE", rank: 43 },
+  { name: "Noah Gray", pos: "TE", rank: 44 },
+  { name: "Elijah Arroyo", pos: "TE", rank: 45 },
+  { name: "Olamide Zaccheaus", pos: "WR", rank: 122 },
+  { name: "Ja\'Tavion Sanders", pos: "TE", rank: 46 },
+  { name: "Ty Simpson", pos: "QB", rank: 39 },
+  { name: "Justin Fields", pos: "QB", rank: 40 },
+  { name: "Joshua Palmer", pos: "WR", rank: 123 },
+  { name: "Dawson Knox", pos: "TE", rank: 47 },
+  { name: "Tyler Higbee", pos: "TE", rank: 48 },
+  { name: "Brenen Thompson", pos: "WR", rank: 124 },
+  { name: "Bryce Lance", pos: "WR", rank: 125 },
+  { name: "Eli Raridon", pos: "TE", rank: 49 },
+  { name: "Treylon Burks", pos: "WR", rank: 126 },
+  { name: "Eli Heidenreich", pos: "RB", rank: 102 },
+  { name: "Michael Carter", pos: "RB", rank: 103 },
+  { name: "Kendrick Bourne", pos: "WR", rank: 127 },
+  { name: "Justin Joly", pos: "TE", rank: 50 },
+  { name: "Anthony Richardson Sr.", pos: "QB", rank: 41 },
+  { name: "Jaylin Lane", pos: "WR", rank: 128 },
+  { name: "Dont\'e Thornton Jr.", pos: "WR", rank: 129 },
+  { name: "Raheim Sanders", pos: "RB", rank: 104 },
+  { name: "Jawhar Jordan", pos: "RB", rank: 105 },
+  { name: "Nick Chubb", pos: "RB", rank: 106 },
+  { name: "Noah Fant", pos: "TE", rank: 51 },
+  { name: "Xavier Hutchinson", pos: "WR", rank: 130 },
+  { name: "Savion Williams", pos: "WR", rank: 131 },
+  { name: "John Metchie III", pos: "WR", rank: 132 },
+  { name: "J\'Mari Taylor", pos: "RB", rank: 107 },
+  { name: "Joe Flacco", pos: "QB", rank: 42 },
+  { name: "Mitchell Evans", pos: "TE", rank: 52 },
+  { name: "Kevin Coleman Jr.", pos: "WR", rank: 133 },
+  { name: "Luke Musgrave", pos: "TE", rank: 53 },
+  { name: "KaVontae Turpin", pos: "WR", rank: 134 },
+  { name: "CJ Daniels", pos: "WR", rank: 135 },
+  { name: "Ben Sinnott", pos: "TE", rank: 54 },
+  { name: "Tutu Atwell", pos: "WR", rank: 136 },
+  { name: "Tommy Tremble", pos: "TE", rank: 55 },
+  { name: "Deion Burks", pos: "WR", rank: 137 },
+  { name: "Nick Westbrook-Ikhine", pos: "WR", rank: 138 },
+  { name: "Austin Ekeler", pos: "RB", rank: 108 },
+  { name: "Phil Mafah", pos: "RB", rank: 109 },
+  { name: "Zavion Thomas", pos: "WR", rank: 139 },
+  { name: "Kalif Raymond", pos: "WR", rank: 140 },
+  { name: "Ashton Dulin", pos: "WR", rank: 141 },
+  { name: "Joe Milton III", pos: "QB", rank: 43 },
+  { name: "Daniel Bellinger", pos: "TE", rank: 56 },
+  { name: "Devontez Walker", pos: "WR", rank: 142 },
+  { name: "Roman Wilson", pos: "WR", rank: 143 },
+  { name: "Jam Miller", pos: "RB", rank: 110 },
+  { name: "Roschon Johnson", pos: "RB", rank: 111 },
+  { name: "Dameon Pierce", pos: "RB", rank: 112 },
+  { name: "Marcus Mariota", pos: "QB", rank: 44 },
+  { name: "Jordan Whittington", pos: "WR", rank: 144 },
+  { name: "Charlie Kolar", pos: "TE", rank: 57 },
+  { name: "Darren Waller", pos: "TE", rank: 58 },
+  { name: "Austin Hooper", pos: "TE", rank: 59 },
+  { name: "Greg Dortch", pos: "WR", rank: 145 },
+  { name: "Damien Martinez", pos: "RB", rank: 113 },
+  { name: "Rasheen Ali", pos: "RB", rank: 114 },
+  { name: "Zach Ertz", pos: "TE", rank: 60 },
+  { name: "Dyami Brown", pos: "WR", rank: 146 },
+  { name: "Jonnu Smith", pos: "TE", rank: 61 },
+  { name: "Jameis Winston", pos: "QB", rank: 45 },
+  { name: "Malik Benson", pos: "WR", rank: 147 },
+  { name: "Terrell Jennings", pos: "RB", rank: 115 },
+  { name: "Zavier Scott", pos: "RB", rank: 116 },
+  { name: "Colbie Young", pos: "WR", rank: 148 },
+  { name: "Demarcus Robinson", pos: "WR", rank: 149 },
+  { name: "John Bates", pos: "TE", rank: 62 },
+  { name: "Tommy Myers", pos: "TE", rank: 63 },
+  { name: "Will Kacmarek", pos: "TE", rank: 64 },
+  { name: "Jeremy McNichols", pos: "RB", rank: 117 },
+  { name: "Riley Leonard", pos: "QB", rank: 46 },
+  { name: "Adam Trautman", pos: "TE", rank: 65 },
+  { name: "Mo Alie-Cox", pos: "TE", rank: 66 },
+  { name: "Tanner Koziol", pos: "TE", rank: 67 },
+  { name: "Sione Vaki", pos: "RB", rank: 118 },
+  { name: "Jahdae Walker", pos: "WR", rank: 150 },
+  { name: "Jackson Hawes", pos: "TE", rank: 68 },
+  { name: "Elijah Higgins", pos: "TE", rank: 69 },
+  { name: "Antonio Gibson", pos: "RB", rank: 119 },
+  { name: "Robert Henry Jr.", pos: "RB", rank: 120 },
+  { name: "Kyle Juszczyk", pos: "RB", rank: 121 },
+  { name: "Odell Beckham Jr.", pos: "WR", rank: 151 },
+  { name: "Tim Patrick", pos: "WR", rank: 152 },
+  { name: "Marquez Valdes-Scantling", pos: "WR", rank: 153 },
+  { name: "Marlin Klein", pos: "TE", rank: 70 },
+  { name: "Nate Boerkircher", pos: "TE", rank: 71 },
+  { name: "Mitch Tinsley", pos: "WR", rank: 154 },
+  { name: "Ty Chandler", pos: "RB", rank: 122 },
+  { name: "Tai Felton", pos: "WR", rank: 155 },
+  { name: "Luke Schoonmaker", pos: "TE", rank: 72 },
+  { name: "Tyler Goodson", pos: "RB", rank: 123 },
+  { name: "Dylan Laube", pos: "RB", rank: 124 },
+  { name: "Khalil Herbert", pos: "RB", rank: 125 },
+  { name: "Xavier Smith", pos: "WR", rank: 156 },
+  { name: "Ronnie Rivers", pos: "RB", rank: 126 },
+  { name: "Myles Montgomery", pos: "RB", rank: 127 },
+  { name: "Reggie Virgil", pos: "WR", rank: 157 },
+  { name: "Efton Chism III", pos: "WR", rank: 158 },
+  { name: "Reggie Gilliam", pos: "RB", rank: 128 },
+  { name: "Miles Davis", pos: "RB", rank: 129 },
+  { name: "Lil\'Jordan Humphrey", pos: "WR", rank: 159 },
+  { name: "Gardner Minshew II", pos: "QB", rank: 47 },
+  { name: "Cade Klubnik", pos: "QB", rank: 48 },
+  { name: "Xavier Restrepo", pos: "WR", rank: 160 },
+  { name: "Theo Wease Jr.", pos: "WR", rank: 161 },
+  { name: "JuJu Smith-Schuster", pos: "WR", rank: 162 },
+  { name: "Tyler Lockett", pos: "WR", rank: 163 },
+  { name: "DeAndre Hopkins", pos: "WR", rank: 164 },
+  { name: "Quinn Ewers", pos: "QB", rank: 49 },
+  { name: "Jack Endries", pos: "TE", rank: 73 },
+  { name: "Taysom Hill", pos: "TE", rank: 74 },
+  { name: "Josh Oliver", pos: "TE", rank: 75 },
+  { name: "Jeremy Ruckert", pos: "TE", rank: 76 },
+  { name: "Roman Hemby", pos: "RB", rank: 130 },
+  { name: "David Sills V", pos: "WR", rank: 165 },
+  { name: "Hunter Luepke", pos: "RB", rank: 131 },
+  { name: "Seydou Traore", pos: "TE", rank: 77 },
+  { name: "Durham Smythe", pos: "TE", rank: 78 },
+  { name: "Tyler Conklin", pos: "TE", rank: 79 },
+  { name: "Miles Sanders", pos: "RB", rank: 132 },
+  { name: "Nate Adkins", pos: "TE", rank: 80 },
+  { name: "Moliki Matavao", pos: "TE", rank: 81 },
+  { name: "Miles Kitselman", pos: "TE", rank: 82 },
+  { name: "Raheem Mostert", pos: "RB", rank: 133 },
+  { name: "Jaydn Ott", pos: "RB", rank: 134 },
+  { name: "Will Dissly", pos: "TE", rank: 83 },
+  { name: "Ian Thomas", pos: "TE", rank: 84 },
+  { name: "Cash Jones", pos: "RB", rank: 135 },
+  { name: "Jaret Patterson", pos: "RB", rank: 136 },
+  { name: "Khalil Dinkins", pos: "TE", rank: 85 },
+  { name: "Alexander Mattison", pos: "RB", rank: 137 },
+  { name: "Donovan Edwards", pos: "RB", rank: 138 },
+  { name: "Kalel Mullings", pos: "RB", rank: 139 },
+  { name: "Frank Gore Jr.", pos: "RB", rank: 140 },
+  { name: "Noah Whittington", pos: "RB", rank: 141 },
+  { name: "Jake Bobo", pos: "WR", rank: 166 },
+  { name: "Scotty Miller", pos: "WR", rank: 167 },
+  { name: "Jacob Saylors", pos: "RB", rank: 142 },
+  { name: "Elijah Moore", pos: "WR", rank: 168 },
+  { name: "KeAndre Lambert-Smith", pos: "WR", rank: 169 },
+  { name: "Dohnte Meyers", pos: "WR", rank: 170 },
+  { name: "Jimmy Horn Jr.", pos: "WR", rank: 171 },
+  { name: "Zamir White", pos: "RB", rank: 143 },
+  { name: "Alec Ingold", pos: "RB", rank: 144 },
+  { name: "Elijah Tau-Tolliver", pos: "RB", rank: 145 },
+  { name: "Michael Burton", pos: "RB", rank: 146 },
+  { name: "Patrick Ricard", pos: "RB", rank: 147 },
+  { name: "Brandin Cooks", pos: "WR", rank: 172 },
+  { name: "Jacob Cowing", pos: "WR", rank: 173 },
+  { name: "Davis Mills", pos: "QB", rank: 50 },
+  { name: "Dontae McMillan", pos: "RB", rank: 148 },
+  { name: "Adam Prentice", pos: "RB", rank: 149 },
+  { name: "Max Bredeson", pos: "RB", rank: 150 },
+  { name: "Spencer Rattler", pos: "QB", rank: 51 },
+  { name: "Anthony Gould", pos: "WR", rank: 174 },
+  { name: "Dean Connors", pos: "RB", rank: 151 },
+];
+function findNearby(name, spread) {
+  const target = RANKINGS.find((p) => p.name.toLowerCase() === name.trim().toLowerCase());
+  if (!target) return null;
+  const nearby = RANKINGS.filter(
+    (p) => p.pos === target.pos && p.name !== target.name && Math.abs(p.rank - target.rank) <= spread
+  ).sort((a, b) => a.rank - b.rank);
+  return { target, nearby };
+}
+function emptyWatchlists() {
+  const w = {};
+  PEOPLE.forEach((p) => (w[p] = { fire: [], ice: [] }));
+  return w;
+}
+function computeStandings(bets) {
+  const m = {};
+  PEOPLE.forEach((p) => {
+    m[p] = {};
+    PEOPLE.forEach((q) => {
+      if (p !== q) m[p][q] = { w: 0, l: 0, p: 0 };
+    });
+  });
+  bets
+    .filter((b) => b.status === "resolved")
+    .forEach((bet) => {
+      pairLoop(bet, (A, B) => {
+        const oA = bet.outcomes?.[A],
+          oB = bet.outcomes?.[B];
+        if (!oA || !oB) return;
+        if (oA === oB || oA === "push" || oB === "push") m[A][B].p++;
+        else if (oA === "win" && oB === "loss") m[A][B].w++;
+        else if (oA === "loss" && oB === "win") m[A][B].l++;
+      });
+    });
+  return m;
+}
+function computeTally(bets) {
+  const net = {};
+  PEOPLE.forEach((p) => {
+    net[p] = {};
+    PEOPLE.forEach((q) => {
+      if (p !== q) net[p][q] = 0;
+    });
+  });
+  bets
+    .filter((b) => b.status === "resolved" && !b.settled && b.stake)
+    .forEach((bet) => {
+      pairLoop(bet, (A, B) => {
+        const oA = bet.outcomes?.[A],
+          oB = bet.outcomes?.[B];
+        if (oA === "win" && oB === "loss") {
+          net[A][B] += bet.stake;
+          net[B][A] -= bet.stake;
+        }
+      });
+    });
+  return net;
+}
+function seasonsIn(bets) {
+  const set = new Set(bets.map((b) => b.season).filter(Boolean));
+  return Array.from(set).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+}
+function Stamp({ status }) {
+  const map = {
+    active: { label: "ACTIVE", color: "#FFD200" },
+    proposed: { label: "PENDING", color: "#9A9A9A" },
+    void: { label: "VOID", color: "#E21833" },
+    resolved: { label: "SETTLED", color: "#6FCF7A" },
+  };
+  const s = map[status];
+  return (
+    <span className="stamp" style={{ color: s.color, borderColor: s.color }}>
+      {s.label}
+    </span>
+  );
+}
+function Chip({ person }) {
+  return (
+    <span
+      className="chip"
+      style={{ background: PERSON_COLOR[person], color: PERSON_TEXT_ON_CHIP[person] }}
+    >
+      {person[0]}
+    </span>
+  );
+}
+function BoardBetTracker() {
+  const [bets, setBets] = useState([]);
+  const [settlements, setSettlements] = useState([]);
+  const [watchlists, setWatchlists] = useState(emptyWatchlists());
+  const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState(null);
+  const [tab, setTab] = useState("propose");
+  const [resolvingId, setResolvingId] = useState(null);
+  const [resolveDraft, setResolveDraft] = useState({});
+  const [voidingId, setVoidingId] = useState(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [seasonPick, setSeasonPick] = useState(null);
+  const [confirmingSettle, setConfirmingSettle] = useState(false);
+  const [form, setForm] = useState({
+    title: "",
+    note: "",
+    mode: "log",
+    proposer: "Sangeet",
+    season: defaultSeason(),
+    stake: "1",
+    sides: emptySides(),
+  });
+  const [ideaQuery, setIdeaQuery] = useState("");
+  const ideaResult = useMemo(
+    () => (ideaQuery.trim() ? findNearby(ideaQuery, 5) : null),
+    [ideaQuery]
+  );
+  function useIdea(otherName) {
+    setForm((f) => ({ ...f, title: `${ideaResult.target.name} vs ${otherName}` }));
+  }
+  const fireIceMatchups = useMemo(() => {
+    const matches = [];
+    const seen = new Set();
+    PEOPLE.forEach((pFire) => {
+      (watchlists[pFire]?.fire || []).forEach((name) => {
+        PEOPLE.forEach((pIce) => {
+          if (pIce === pFire) return;
+          if ((watchlists[pIce]?.ice || []).some((n) => n.toLowerCase() === name.toLowerCase())) {
+            const key = name.toLowerCase() + "::" + pFire + "::" + pIce;
+            if (!seen.has(key)) {
+              seen.add(key);
+              matches.push({ name, firePerson: pFire, icePerson: pIce });
+            }
+          }
+        });
+      });
+    });
+    return matches;
+  }, [watchlists]);
+  function useMatchupIdea(m) {
+    setForm((f) => ({
+      ...f,
+      title: `${m.name} — buy or fade?`,
+      note: `${m.firePerson} is high on him (🔥), ${m.icePerson} wants to fade (❄️).`,
+    }));
+  }
+  useEffect(() => {
+    const unsub = boardDocRef.onSnapshot(
+      (snap) => {
+        if (snap.exists) {
+          const data = snap.data();
+          setBets(data.bets || []);
+          setSettlements(data.settlements || []);
+          setWatchlists({ ...emptyWatchlists(), ...(data.watchlists || {}) });
+        }
+        setLoading(false);
+        setSaveError(null);
+      },
+      (e) => {
+        setSaveError("Couldn't connect to the shared board — check the Firebase config.");
+        setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, []);
+  function persist(nextBets, nextSettlements, nextWatchlists) {
+    const finalBets = nextBets ?? bets;
+    const finalSettlements = nextSettlements ?? settlements;
+    const finalWatchlists = nextWatchlists ?? watchlists;
+    setBets(finalBets);
+    setSettlements(finalSettlements);
+    setWatchlists(finalWatchlists);
+    boardDocRef
+      .set({ bets: finalBets, settlements: finalSettlements, watchlists: finalWatchlists })
+      .then(() => setSaveError(null))
+      .catch(() => setSaveError("Couldn't save — try again."));
+  }
+  const [watchDraft, setWatchDraft] = useState({});
+  function addWatch(person, kind) {
+    const key = person + "::" + kind;
+    const name = (watchDraft[key] || "").trim();
+    if (!name) return;
+    const list = watchlists[person][kind];
+    if (list.some((n) => n.toLowerCase() === name.toLowerCase())) {
+      setWatchDraft({ ...watchDraft, [key]: "" });
+      return;
+    }
+    const next = {
+      ...watchlists,
+      [person]: { ...watchlists[person], [kind]: [...list, name] },
+    };
+    persist(undefined, undefined, next);
+    setWatchDraft({ ...watchDraft, [key]: "" });
+  }
+  function removeWatch(person, kind, name) {
+    const next = {
+      ...watchlists,
+      [person]: {
+        ...watchlists[person],
+        [kind]: watchlists[person][kind].filter((n) => n !== name),
+      },
+    };
+    persist(undefined, undefined, next);
+  }
+  function watchTagsFor(playerName) {
+    const tags = [];
+    PEOPLE.forEach((p) => {
+      if (watchlists[p]?.fire?.some((n) => n.toLowerCase() === playerName.toLowerCase())) {
+        tags.push({ person: p, kind: "fire" });
+      }
+      if (watchlists[p]?.ice?.some((n) => n.toLowerCase() === playerName.toLowerCase())) {
+        tags.push({ person: p, kind: "ice" });
+      }
+    });
+    return tags;
+  }
+  const standingsAllTime = useMemo(() => computeStandings(bets), [bets]);
+  const seasons = useMemo(() => seasonsIn(bets), [bets]);
+  const activeSeason = seasonPick || seasons[0] || null;
+  const standingsSeason = useMemo(
+    () =>
+      computeStandings(
+        activeSeason ? bets.filter((b) => b.season === activeSeason) : []
+      ),
+    [bets, activeSeason]
+  );
+  const tally = useMemo(() => computeTally(bets), [bets]);
+  const [staleOnly, setStaleOnly] = useState(false);
+  const activeBetsAll = bets.filter((b) => b.status === "active");
+  const staleActive = activeBetsAll.filter((b) => b.season !== defaultSeason());
+  const staleSeasons = Array.from(new Set(staleActive.map((b) => b.season))).sort();
+  const activeBets = staleOnly ? staleActive : activeBetsAll;
+  const proposedBets = bets.filter((b) => b.status === "proposed");
+  const historyBets = bets
+    .filter((b) => b.status === "resolved" || b.status === "void")
+    .slice()
+    .sort((a, b) => {
+      const seasonDiff = (b.season || "").localeCompare(a.season || "");
+      if (seasonDiff !== 0) return seasonDiff;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+  function resetForm() {
+    setForm({
+      title: "",
+      note: "",
+      mode: "log",
+      proposer: "Sangeet",
+      season: defaultSeason(),
+      stake: "1",
+      sides: emptySides(),
+    });
+  }
+  function submitBet() {
+    if (!form.title.trim()) return;
+    const inCount = PEOPLE.filter((p) => form.sides[p].in).length;
+    if (inCount < 2) return;
+    const sides = {};
+    PEOPLE.forEach((p) => {
+      const isProposer = p === form.proposer;
+      const typedPick = form.sides[p].pick.trim();
+      let pick;
+      if (!form.sides[p].in) pick = "SKIP";
+      else if (form.mode === "log" || isProposer) pick = typedPick || "—";
+      else pick = typedPick || "TBD";
+      sides[p] = {
+        in: form.sides[p].in,
+        pick,
+        accepted: form.mode === "log" ? true : isProposer,
+      };
+    });
+    const bet = {
+      id: uid(),
+      title: form.title.trim(),
+      note: form.note.trim(),
+      createdBy: form.proposer,
+      createdAt: new Date().toISOString(),
+      season: form.season.trim() || defaultSeason(),
+      stake: form.stake ? Number(form.stake) : null,
+      status: form.mode === "log" ? "active" : "proposed",
+      sides,
+      voidReason: null,
+      outcomes: {},
+      settled: false,
+    };
+    persist([bet, ...bets], settlements);
+    resetForm();
+    setTab(bet.status === "active" ? "active" : "propose");
+  }
+  const [acceptDrafts, setAcceptDrafts] = useState({});
+  function draftKey(betId, person) {
+    return betId + "::" + person;
+  }
+  function getAcceptDraft(bet, person) {
+    const k = draftKey(bet.id, person);
+    if (acceptDrafts[k] !== undefined) return acceptDrafts[k];
+    return bet.sides[person].pick === "TBD" ? "" : bet.sides[person].pick;
+  }
+  function setAcceptDraft(betId, person, value) {
+    setAcceptDrafts({ ...acceptDrafts, [draftKey(betId, person)]: value });
+  }
+  function accept(betId, person) {
+    const bet = bets.find((b) => b.id === betId);
+    const draftPick = getAcceptDraft(bet, person).trim();
+    const next = bets.map((b) => {
+      if (b.id !== betId) return b;
+      const sides = {
+        ...b.sides,
+        [person]: {
+          ...b.sides[person],
+          accepted: true,
+          pick: draftPick || b.sides[person].pick,
+        },
+      };
+      const stillWaiting = PEOPLE.some((p) => sides[p].in && !sides[p].accepted);
+      return { ...b, sides, status: stillWaiting ? "proposed" : "active" };
+    });
+    persist(next);
+  }
+  function isUntakenPick(pick) {
+    return pick === "—" || pick === "TBD";
+  }
+  const [pickEditingKey, setPickEditingKey] = useState(null);
+  const [pickDraft, setPickDraft] = useState("");
+  function startEditPick(betId, person) {
+    setPickEditingKey(draftKey(betId, person));
+    setPickDraft("");
+  }
+  function saveEditPick(betId, person) {
+    const value = pickDraft.trim();
+    if (!value) return;
+    const next = bets.map((b) => {
+      if (b.id !== betId) return b;
+      return { ...b, sides: { ...b.sides, [person]: { ...b.sides[person], pick: value } } };
+    });
+    persist(next);
+    setPickEditingKey(null);
+    setPickDraft("");
+  }
+  function decline(betId, person) {
+    const next = bets.map((b) =>
+      b.id === betId
+        ? { ...b, status: "void", voidReason: `${person} declined the bet` }
+        : b
+    );
+    persist(next);
+  }
+  function openVoid(betId) {
+    setVoidingId(betId);
+    setVoidReason("");
+  }
+  function confirmVoid() {
+    const next = bets.map((b) =>
+      b.id === voidingId
+        ? { ...b, status: "void", voidReason: voidReason.trim() || "Voided" }
+        : b
+    );
+    persist(next);
+    setVoidingId(null);
+  }
+  function openResolve(bet) {
+    setResolvingId(bet.id);
+    const draft = {};
+    PEOPLE.forEach((p) => {
+      if (bet.sides[p].in) draft[p] = "";
+    });
+    setResolveDraft(draft);
+  }
+  function confirmResolve() {
+    const inPeople = Object.keys(resolveDraft);
+    if (inPeople.some((p) => !resolveDraft[p])) return;
+    const next = bets.map((b) =>
+      b.id === resolvingId
+        ? { ...b, status: "resolved", outcomes: { ...resolveDraft }, settled: false }
+        : b
+    );
+    persist(next);
+    setResolvingId(null);
+  }
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkDrafts, setBulkDrafts] = useState({});
+  function setBulkOutcome(betId, person, value) {
+    setBulkDrafts({
+      ...bulkDrafts,
+      [betId]: { ...(bulkDrafts[betId] || {}), [person]: value },
+    });
+  }
+  function isBetBulkReady(bet) {
+    const draft = bulkDrafts[bet.id];
+    if (!draft) return false;
+    const inPeople = PEOPLE.filter((p) => bet.sides[p].in);
+    return inPeople.length > 0 && inPeople.every((p) => draft[p]);
+  }
+  function saveBulkResults() {
+    const next = bets.map((b) => {
+      if (b.status !== "active" || !isBetBulkReady(b)) return b;
+      return { ...b, status: "resolved", outcomes: { ...bulkDrafts[b.id] }, settled: false };
+    });
+    persist(next);
+    setBulkDrafts({});
+    setBulkMode(false);
+  }
+  function exitBulkMode() {
+    setBulkDrafts({});
+    setBulkMode(false);
+  }
+  function settleUp() {
+    const snapshot = tallyLines();
+    const next = bets.map((b) =>
+      b.status === "resolved" && b.stake ? { ...b, settled: true } : b
+    );
+    const nextSettlements = [
+      { id: uid(), date: new Date().toISOString(), lines: snapshot },
+      ...settlements,
+    ];
+    persist(next, nextSettlements);
+    setConfirmingSettle(false);
+  }
+  function tallyLines() {
+    const lines = [];
+    for (let i = 0; i < PEOPLE.length; i++) {
+      for (let j = i + 1; j < PEOPLE.length; j++) {
+        const A = PEOPLE[i],
+          B = PEOPLE[j];
+        const amt = tally[A][B];
+        if (amt > 0) lines.push(`${B} owes ${A} $${amt}`);
+        else if (amt < 0) lines.push(`${A} owes ${B} $${Math.abs(amt)}`);
+      }
+    }
+    return lines;
+  }
+  const currentTallyLines = tallyLines();
+  const existingIds = new Set(bets.map((b) => b.id));
+  const missingHistory = buildHistoricalBets().filter((b) => !existingIds.has(b.id));
+  function importHistory() {
+    if (missingHistory.length === 0) return;
+    persist([...missingHistory, ...bets]);
+    setTab("history");
+  }
+  const css = `
+    .bbt { background:#0A0A0A; min-height:100%; color:#ECE7DA; font-family:'Inter',sans-serif; padding:20px 16px 48px; }
+    .bbt * { box-sizing:border-box; }
+    .bbt-title { font-family:'Teko',sans-serif; font-weight:700; font-size:42px; letter-spacing:1px; line-height:1; color:#ECE7DA; margin:0; }
+    .bbt-title .accent { color:#FFD200; }
+    .bbt-sub { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9A9A; letter-spacing:1.5px; text-transform:uppercase; margin-top:4px; }
+    .rule { height:3px; background:linear-gradient(90deg,#E21833,#FFD200); margin:14px 0 18px; border-radius:2px; }
+    .scoreboard { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:14px; }
+    .score-cell { background:#161616; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:10px 8px; text-align:center; }
+    .score-names { font-family:'IBM Plex Mono',monospace; font-size:10px; color:#9A9A9A; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+    .score-record { font-family:'Teko',sans-serif; font-size:26px; font-weight:600; letter-spacing:1px; }
+    .tabs { display:flex; gap:6px; border-bottom:1px solid rgba(255,255,255,0.1); margin-bottom:16px; overflow-x:auto; }
+    .tab-btn { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:1px; text-transform:uppercase; background:none; border:none; color:#9A9A9A; padding:10px 12px; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; }
+    .tab-btn.active { color:#FFD200; border-bottom-color:#E21833; }
+    .tab-btn .count { opacity:0.6; margin-left:3px; }
+    .card { background:#161616; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px 16px; margin-bottom:12px; }
+    .bet-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px; }
+    .bet-title { font-family:'Teko',sans-serif; font-size:22px; font-weight:600; letter-spacing:0.5px; margin:0; }
+    .bet-note { font-size:12.5px; color:#9A9A9A; margin-top:2px; }
+    .bet-meta { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#6B6B6B; margin-top:3px; }
+    .stamp { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:1.5px; border:1px solid; border-radius:3px; padding:3px 7px; white-space:nowrap; transform:rotate(-2deg); display:inline-block; }
+    .sides-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .side-pill { display:flex; align-items:center; gap:6px; background:#0F0F0F; border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:5px 10px 5px 5px; font-size:12.5px; }
+    .side-pill.skip { opacity:0.4; }
+    .chip { width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; flex-shrink:0; }
+    .outcome-tag { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; margin-left:4px; padding:1px 5px; border-radius:3px; }
+    .outcome-win { background:rgba(111,207,122,0.18); color:#6FCF7A; }
+    .outcome-loss { background:rgba(255,107,107,0.18); color:#FF6B6B; }
+    .outcome-push { background:rgba(154,154,154,0.2); color:#9A9A9A; }
+    .actions-row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .btn { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.5px; text-transform:uppercase; border-radius:5px; padding:7px 12px; cursor:pointer; border:1px solid rgba(255,255,255,0.16); background:transparent; color:#ECE7DA; }
+    .btn:hover { border-color:#FFD200; color:#FFD200; }
+    .btn.primary { background:#FFD200; color:#000; border-color:#FFD200; font-weight:600; }
+    .btn.primary:hover { opacity:0.88; color:#000; }
+    .btn.danger { border-color:rgba(226,24,51,0.55); color:#FF6B6B; }
+    .btn.danger:hover { border-color:#E21833; color:#E21833; }
+    .btn:disabled { opacity:0.35; cursor:not-allowed; }
+    .btn:disabled:hover { border-color:rgba(255,255,255,0.16); color:#ECE7DA; }
+    .void-note { font-size:12px; color:#FF6B6B; margin-top:8px; font-style:italic; }
+    .empty { text-align:center; padding:40px 10px; color:#5A5A5A; font-size:13px; }
+    .form-grid label { display:block; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:1px; text-transform:uppercase; color:#9A9A9A; margin-bottom:5px; margin-top:14px; }
+    .form-grid input[type=text], .form-grid input[type=number], .form-grid textarea, .form-grid select { width:100%; background:#0F0F0F; border:1px solid rgba(255,255,255,0.14); border-radius:5px; padding:9px 10px; color:#ECE7DA; font-family:'Inter',sans-serif; font-size:14px; }
+    .form-grid textarea { resize:vertical; min-height:44px; }
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .season-locked { background:#0A0A0A; border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:9px 10px; color:#6B6B6B; font-size:14px; }
+    .accept-list { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+    .accept-row { display:flex; align-items:center; gap:8px; background:#0D0D0D; border:1px solid rgba(255,255,255,0.1); border-radius:6px; padding:7px 8px; }
+    .accept-row input[type=text] { flex:1; background:#0A0A0A; border:1px solid rgba(255,255,255,0.14); border-radius:5px; padding:7px 9px; color:#ECE7DA; font-size:13px; min-width:0; }
+    .mode-toggle { display:flex; gap:8px; margin-top:6px; }
+    .mode-toggle button { flex:1; padding:9px; border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:#0F0F0F; color:#9A9A9A; font-size:12.5px; cursor:pointer; }
+    .mode-toggle button.on { border-color:#FFD200; color:#FFD200; background:rgba(255,210,0,0.08); }
+    .person-row { display:flex; align-items:center; gap:10px; margin-top:10px; background:#0F0F0F; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; }
+    .person-row input[type=text] { flex:1; background:#0A0A0A; border:1px solid rgba(255,255,255,0.12); border-radius:5px; padding:7px 9px; color:#ECE7DA; font-size:13px; }
+    .skip-toggle { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; color:#9A9A9A; cursor:pointer; user-select:none; padding:5px 8px; border:1px solid rgba(255,255,255,0.12); border-radius:4px; white-space:nowrap; }
+    .skip-toggle.active { color:#E21833; border-color:#E21833; }
+    .submit-row { margin-top:18px; display:flex; justify-content:flex-end; }
+    .resolve-panel, .void-panel { background:#0D0D0D; border:1px dashed rgba(255,255,255,0.2); border-radius:6px; padding:10px 12px; margin-top:10px; }
+    .resolve-person { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; }
+    .outcome-btns { display:flex; gap:5px; }
+    .outcome-btns button { font-family:'IBM Plex Mono',monospace; font-size:10px; padding:5px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.16); background:transparent; color:#9A9A9A; cursor:pointer; }
+    .outcome-btns button.sel-win { background:rgba(111,207,122,0.22); color:#6FCF7A; border-color:#6FCF7A; }
+    .outcome-btns button.sel-loss { background:rgba(255,107,107,0.22); color:#FF6B6B; border-color:#E21833; }
+    .outcome-btns button.sel-push { background:rgba(154,154,154,0.22); color:#ECE7DA; border-color:#9A9A9A; }
+    .save-err { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#FF6B6B; margin-bottom:10px; }
+    .standings-table { width:100%; border-collapse:collapse; margin-top:6px; font-size:13px; }
+    .standings-table th, .standings-table td { border:1px solid rgba(255,255,255,0.08); padding:8px; text-align:center; }
+    .standings-table th { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:1px; color:#9A9A9A; text-transform:uppercase; }
+    .standings-table td.self { color:#3A3A3A; }
+    .season-select { font-family:'IBM Plex Mono',monospace; font-size:11px; background:#0F0F0F; color:#FFD200; border:1px solid rgba(255,255,255,0.16); border-radius:5px; padding:5px 8px; margin-left:8px; }
+    .section-label { font-family:'Teko',sans-serif; font-size:22px; font-weight:600; letter-spacing:0.5px; margin:0 0 6px; }
+    .tally-line { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.06); font-size:14px; }
+    .tally-line:last-child { border-bottom:none; }
+    .tally-amt { font-family:'Teko',sans-serif; font-size:20px; font-weight:600; color:#FFD200; }
+    .settle-log { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#6B6B6B; margin-top:4px; }
+    .pick-edit-btn { font-family:'IBM Plex Mono',monospace; font-size:9px; letter-spacing:0.5px; text-transform:uppercase; background:none; border:1px solid rgba(255,210,0,0.5); color:#FFD200; border-radius:3px; padding:2px 6px; cursor:pointer; margin-left:2px; }
+    .pick-edit-btn:hover { background:rgba(255,210,0,0.12); }
+    .watch-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+    .watch-col-title { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    .watch-section { margin-top:14px; }
+    .watch-section-label { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px; display:flex; align-items:center; gap:5px; }
+    .watch-section-label.fire { color:#FF6B4A; }
+    .watch-section-label.ice { color:#6FD3FF; }
+    .watch-list { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+    .watch-item { display:flex; align-items:center; justify-content:space-between; background:#0F0F0F; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:6px 8px; font-size:13px; }
+    .watch-item button { background:none; border:none; color:#5A5A5A; cursor:pointer; font-size:13px; padding:0 4px; }
+    .watch-item button:hover { color:#E21833; }
+    .watch-add-row { display:flex; gap:6px; }
+    .watch-add-row input { flex:1; background:#0A0A0A; border:1px solid rgba(255,255,255,0.14); border-radius:5px; padding:7px 9px; color:#ECE7DA; font-size:13px; }
+    .idea-input-row { display:flex; gap:8px; margin-top:6px; }
+    .idea-input-row input { flex:1; background:#0F0F0F; border:1px solid rgba(255,255,255,0.14); border-radius:5px; padding:9px 10px; color:#ECE7DA; font-family:'Inter',sans-serif; font-size:14px; }
+    .idea-nearby-list { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
+    .idea-nearby-row { display:flex; align-items:center; justify-content:space-between; gap:8px; background:#0F0F0F; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; flex-wrap:wrap; }
+    .idea-nearby-name { font-size:13.5px; }
+    .idea-nearby-rank { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#6B6B6B; margin-left:6px; }
+    .idea-watch-tag { font-family:'IBM Plex Mono',monospace; font-size:9.5px; letter-spacing:0.5px; border-radius:3px; padding:1px 5px; margin-left:6px; }
+    .idea-watch-tag.fire { background:rgba(255,107,74,0.18); color:#FF6B4A; }
+    .idea-watch-tag.ice { background:rgba(111,211,255,0.18); color:#6FD3FF; }
+  `;
+  if (loading) {
+    return (
+      <div className="bbt">
+        <style>{css}</style>
+        <div className="empty">Loading the board…</div>
+      </div>
+    );
+  }
+  return (
+    <div className="bbt">
+      <style>{css}</style>
+      <h1 className="bbt-title">
+        THE <span className="accent">BOARD</span>
+      </h1>
+      <div className="bbt-sub">Josh · Adam · Sangeet — .5 PPR, Yahoo standard</div>
+      <div className="rule" />
+      <div className="scoreboard">
+        {[
+          ["Josh", "Adam"],
+          ["Josh", "Sangeet"],
+          ["Adam", "Sangeet"],
+        ].map(([a, b]) => {
+          const r1 = standingsAllTime[a][b];
+          return (
+            <div className="score-cell" key={a + b}>
+              <div className="score-names">
+                {a} vs {b}
+              </div>
+              <div className="score-record">
+                <span style={{ color: PERSON_COLOR[a] }}>{r1.w}</span>
+                <span style={{ color: "#5A5A5A" }}>-</span>
+                <span style={{ color: PERSON_COLOR[b] }}>{r1.l}</span>
+                <span style={{ color: "#5A5A5A" }}>-{r1.p}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {saveError && <div className="save-err">{saveError}</div>}
+      <div className="tabs">
+        {[
+          ["propose", "Propose", proposedBets.length],
+          ["active", "Active", activeBetsAll.length],
+          ["history", "History", historyBets.length],
+          ["standings", "Standings", null],
+          ["tally", "Who Owes Who", null],
+          ["watchlist", "❄️ Ice & Fire 🔥", null],
+        ].map(([key, label, count]) => (
+          <button
+            key={key}
+            className={"tab-btn" + (tab === key ? " active" : "")}
+            onClick={() => setTab(key)}
+          >
+            {label}
+            {count != null && <span className="count">({count})</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "active" && (
+        <div>
+          {staleActive.length > 0 && (
+            <div className="card" style={{ borderColor: "#FFD200" }}>
+              <p className="bet-title" style={{ marginBottom: 4 }}>
+                Wrap up {staleSeasons.join(", ")}
+              </p>
+              <div className="bet-note" style={{ marginBottom: 10 }}>
+                {staleActive.length} bet{staleActive.length > 1 ? "s" : ""} from a season that's
+                not the current one {staleActive.length > 1 ? "are" : "is"} still active. Once
+                week 17 wraps, run through these and enter results.
+              </div>
+              <button className="btn primary" onClick={() => setStaleOnly(!staleOnly)}>
+                {staleOnly ? "Show all active" : "Show just these"}
+              </button>
+            </div>
+          )}
+          {activeBets.length > 0 && (
+            <div className="actions-row" style={{ marginBottom: 4 }}>
+              {bulkMode ? (
+                <button className="btn" onClick={exitBulkMode}>
+                  Cancel bulk resolve
+                </button>
+              ) : (
+                <button className="btn primary" onClick={() => setBulkMode(true)}>
+                  Bulk resolve
+                </button>
+              )}
+            </div>
+          )}
+          {activeBets.length === 0 && (
+            <div className="empty">No active bets on the board yet.</div>
+          )}
+          {activeBets.map((bet) => (
+            <div className="card" key={bet.id}>
+              <div className="bet-head">
+                <div>
+                  <p className="bet-title">{bet.title}</p>
+                  {bet.note && <div className="bet-note">{bet.note}</div>}
+                  <div className="bet-meta">
+                    {bet.season} season{bet.stake ? ` · $${bet.stake} a side` : ""}
+                  </div>
+                </div>
+                <Stamp status="active" />
+              </div>
+              <div className="sides-row">
+                {PEOPLE.map((p) => {
+                  const untaken = bet.sides[p].in && isUntakenPick(bet.sides[p].pick);
+                  const editing = pickEditingKey === draftKey(bet.id, p);
+                  return (
+                    <span className={"side-pill" + (bet.sides[p].in ? "" : " skip")} key={p}>
+                      <Chip person={p} />
+                      {bet.sides[p].in ? bet.sides[p].pick : "sitting out"}
+                      {untaken && !bulkMode && !editing && (
+                        <button
+                          className="pick-edit-btn"
+                          onClick={() => startEditPick(bet.id, p)}
+                          title={`${p} hasn't set a pick yet — set one`}
+                        >
+                          set pick
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              {PEOPLE.some(
+                (p) => pickEditingKey === draftKey(bet.id, p) && bet.sides[p].in
+              ) && (
+                <div className="void-panel">
+                  {PEOPLE.filter((p) => pickEditingKey === draftKey(bet.id, p)).map((p) => (
+                    <div key={p}>
+                      <label
+                        style={{
+                          fontFamily: "IBM Plex Mono, monospace",
+                          fontSize: 10.5,
+                          letterSpacing: 1,
+                          textTransform: "uppercase",
+                          color: "#9A9A9A",
+                        }}
+                      >
+                        {p}'s pick (can only be set once — no changing it after)
+                      </label>
+                      <input
+                        type="text"
+                        value={pickDraft}
+                        onChange={(e) => setPickDraft(e.target.value)}
+                        placeholder="their pick / position on the bet"
+                        style={{
+                          width: "100%",
+                          marginTop: 6,
+                          background: "#0A0A0A",
+                          border: "1px solid rgba(255,255,255,0.16)",
+                          borderRadius: 5,
+                          padding: 8,
+                          color: "#ECE7DA",
+                        }}
+                      />
+                      <div className="actions-row">
+                        <button
+                          className="btn primary"
+                          disabled={!pickDraft.trim()}
+                          onClick={() => saveEditPick(bet.id, p)}
+                        >
+                          Save pick
+                        </button>
+                        <button className="btn" onClick={() => setPickEditingKey(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {bulkMode ? (
+                <div className="resolve-panel">
+                  {PEOPLE.filter((p) => bet.sides[p].in).map((p) => (
+                    <div className="resolve-person" key={p}>
+                      <span>
+                        <Chip person={p} /> {p} — {bet.sides[p].pick}
+                      </span>
+                      <div className="outcome-btns">
+                        {["win", "loss", "push"].map((o) => (
+                          <button
+                            key={o}
+                            className={bulkDrafts[bet.id]?.[p] === o ? "sel-" + o : ""}
+                            onClick={() => setBulkOutcome(bet.id, p, o)}
+                          >
+                            {o.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : resolvingId === bet.id ? (
+                <div className="resolve-panel">
+                  {Object.keys(resolveDraft).map((p) => (
+                    <div className="resolve-person" key={p}>
+                      <span>
+                        <Chip person={p} /> {p} — {bet.sides[p].pick}
+                      </span>
+                      <div className="outcome-btns">
+                        {["win", "loss", "push"].map((o) => (
+                          <button
+                            key={o}
+                            className={resolveDraft[p] === o ? "sel-" + o : ""}
+                            onClick={() => setResolveDraft({ ...resolveDraft, [p]: o })}
+                          >
+                            {o.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="actions-row">
+                    <button
+                      className="btn primary"
+                      disabled={Object.values(resolveDraft).some((v) => !v)}
+                      onClick={confirmResolve}
+                    >
+                      Confirm result
+                    </button>
+                    <button className="btn" onClick={() => setResolvingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : voidingId === bet.id ? (
+                <div className="void-panel">
+                  <label
+                    style={{
+                      fontFamily: "IBM Plex Mono, monospace",
+                      fontSize: 10.5,
+                      letterSpacing: 1,
+                      textTransform: "uppercase",
+                      color: "#9A9A9A",
+                    }}
+                  >
+                    Reason (e.g. "CMC out 4+ games")
+                  </label>
+                  <input
+                    type="text"
+                    value={voidReason}
+                    onChange={(e) => setVoidReason(e.target.value)}
+                    style={{
+                      width: "100%",
+                      marginTop: 6,
+                      background: "#0A0A0A",
+                      border: "1px solid rgba(255,255,255,0.16)",
+                      borderRadius: 5,
+                      padding: 8,
+                      color: "#ECE7DA",
+                    }}
+                  />
+                  <div className="actions-row">
+                    <button className="btn danger" onClick={confirmVoid}>
+                      Void bet
+                    </button>
+                    <button className="btn" onClick={() => setVoidingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="actions-row">
+                  <button className="btn primary" onClick={() => openResolve(bet)}>
+                    Enter result
+                  </button>
+                  <button className="btn danger" onClick={() => openVoid(bet.id)}>
+                    Void
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {bulkMode && activeBets.length > 0 && (
+            <div
+              className="card"
+              style={{
+                position: "sticky",
+                bottom: 12,
+                borderColor: "#FFD200",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <span className="bet-note" style={{ margin: 0 }}>
+                {activeBets.filter(isBetBulkReady).length} of {activeBets.length} filled in
+              </span>
+              <div className="actions-row" style={{ margin: 0 }}>
+                <button
+                  className="btn primary"
+                  disabled={activeBets.filter(isBetBulkReady).length === 0}
+                  onClick={saveBulkResults}
+                >
+                  Save {activeBets.filter(isBetBulkReady).length} result
+                  {activeBets.filter(isBetBulkReady).length === 1 ? "" : "s"}
+                </button>
+                <button className="btn" onClick={exitBulkMode}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "history" && (
+        <div>
+          {missingHistory.length > 0 && (
+            <div className="card">
+              <p className="bet-title" style={{ marginBottom: 4 }}>
+                {bets.some((b) => b.id.startsWith("hist-"))
+                  ? "New historical bets available"
+                  : "Load 2015–2022 history"}
+              </p>
+              <div className="bet-note" style={{ marginBottom: 10 }}>
+                {missingHistory.length} bet{missingHistory.length > 1 ? "s" : ""} reconstructed
+                from the old sheet, tagged by season so standings and the tally pick them up
+                automatically.
+              </div>
+              <button className="btn primary" onClick={importHistory}>
+                Import {missingHistory.length} bet{missingHistory.length > 1 ? "s" : ""}
+              </button>
+            </div>
+          )}
+          {historyBets.length === 0 && (
+            <div className="empty">No settled or voided bets yet.</div>
+          )}
+          {historyBets.map((bet) => (
+            <div className="card" key={bet.id}>
+              <div className="bet-head">
+                <div>
+                  <p className="bet-title">{bet.title}</p>
+                  {bet.note && <div className="bet-note">{bet.note}</div>}
+                  <div className="bet-meta">
+                    {bet.season} season{bet.stake ? ` · $${bet.stake} a side` : ""}
+                  </div>
+                </div>
+                <Stamp status={bet.status} />
+              </div>
+              <div className="sides-row">
+                {PEOPLE.map((p) => (
+                  <span className={"side-pill" + (bet.sides[p].in ? "" : " skip")} key={p}>
+                    <Chip person={p} />
+                    {bet.sides[p].in ? bet.sides[p].pick : "sitting out"}
+                    {bet.status === "resolved" && bet.sides[p].in && bet.outcomes[p] && (
+                      <span className={"outcome-tag outcome-" + bet.outcomes[p]}>
+                        {bet.outcomes[p].toUpperCase()}
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+              {bet.status === "void" && <div className="void-note">Voided — {bet.voidReason}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === "standings" && (
+        <div>
+          <div className="card">
+            <p className="section-label">All-Time</p>
+            <table className="standings-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  {PEOPLE.map((p) => (
+                    <th key={p} style={{ color: PERSON_COLOR[p] }}>
+                      {p}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {PEOPLE.map((row) => (
+                  <tr key={row}>
+                    <th style={{ color: PERSON_COLOR[row] }}>{row}</th>
+                    {PEOPLE.map((col) =>
+                      row === col ? (
+                        <td className="self" key={col}>—</td>
+                      ) : (
+                        <td key={col}>
+                          {standingsAllTime[row][col].w}-{standingsAllTime[row][col].l}-
+                          {standingsAllTime[row][col].p}
+                        </td>
+                      )
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="card">
+            <p className="section-label" style={{ display: "inline" }}>
+              Season
+            </p>
+            {seasons.length > 0 ? (
+              <select
+                className="season-select"
+                value={activeSeason || ""}
+                onChange={(e) => setSeasonPick(e.target.value)}
+              >
+                {seasons.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="bet-note"> — no season tagged yet</span>
+            )}
+            {seasons.length > 0 && (
+              <table className="standings-table" style={{ marginTop: 10 }}>
+                <thead>
+                  <tr>
+                    <th></th>
+                    {PEOPLE.map((p) => (
+                      <th key={p} style={{ color: PERSON_COLOR[p] }}>
+                        {p}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {PEOPLE.map((row) => (
+                    <tr key={row}>
+                      <th style={{ color: PERSON_COLOR[row] }}>{row}</th>
+                      {PEOPLE.map((col) =>
+                        row === col ? (
+                          <td className="self" key={col}>—</td>
+                        ) : (
+                          <td key={col}>
+                            {standingsSeason[row][col].w}-{standingsSeason[row][col].l}-
+                            {standingsSeason[row][col].p}
+                          </td>
+                        )
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="bet-note" style={{ marginTop: 10 }}>
+              Read as row's record vs. column (W-L-P). Set a "Season" when you add a bet so it rolls up here — most recent one loads by default.
+            </div>
+          </div>
+        </div>
+      )}
+      {tab === "tally" && (
+        <div className="card">
+          <p className="section-label">Who owes who</p>
+          {currentTallyLines.length === 0 ? (
+            <div className="empty">
+              No open money on the board — every settled bet with a stake is squared up.
+            </div>
+          ) : (
+            currentTallyLines.map((line, i) => {
+              const [ower, , owed, amt] = line.match(/^(.*) owes (.*) \$(.*)$/).slice(1);
+              return (
+                <div className="tally-line" key={i}>
+                  <span>
+                    <strong style={{ color: PERSON_COLOR[ower] }}>{ower}</strong> owes{" "}
+                    <strong style={{ color: PERSON_COLOR[owed] }}>{owed}</strong>
+                  </span>
+                  <span className="tally-amt">${amt}</span>
+                </div>
+              );
+            })
+          )}
+          <div className="actions-row">
+            {confirmingSettle ? (
+              <>
+                <button className="btn primary" onClick={settleUp}>
+                  Confirm — mark all squared
+                </button>
+                <button className="btn" onClick={() => setConfirmingSettle(false)}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn primary"
+                disabled={currentTallyLines.length === 0}
+                onClick={() => setConfirmingSettle(true)}
+              >
+                Settle up
+              </button>
+            )}
+          </div>
+          <div className="bet-note" style={{ marginTop: 12 }}>
+            This tally only counts resolved bets with a stake attached. Standings and history aren't affected by settling up.
+          </div>
+          {settlements.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <p className="section-label" style={{ fontSize: 18 }}>
+                Past settlements
+              </p>
+              {settlements.map((s) => (
+                <div key={s.id} className="settle-log">
+                  {new Date(s.date).toLocaleDateString()} — {s.lines.length ? s.lines.join(", ") : "all square"}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "watchlist" && (
+        <div>
+          <p className="bet-note" style={{ marginBottom: 12 }}>
+            ❄️ Ice = guys you want to fade. 🔥 Fire = guys you're high on and want to back. Use
+            these to spot natural bet matchups — check the idea generator on the Propose tab.
+          </p>
+          <div className="watch-grid">
+            {PEOPLE.map((p) => (
+              <div className="card" key={p}>
+                <div className="watch-col-title">
+                  <Chip person={p} />
+                  <strong style={{ fontFamily: "Teko, sans-serif", fontSize: 20 }}>{p}</strong>
+                </div>
+                {["ice", "fire"].map((kind) => {
+                  const key = p + "::" + kind;
+                  return (
+                    <div className="watch-section" key={kind}>
+                      <div className={"watch-section-label " + kind}>
+                        {kind === "fire" ? "🔥 Fire — backing" : "❄️ Ice — fading"}
+                      </div>
+                      <div className="watch-list">
+                        {watchlists[p][kind].length === 0 && (
+                          <span className="bet-note" style={{ margin: 0 }}>Nobody added yet</span>
+                        )}
+                        {watchlists[p][kind].map((name) => (
+                          <div className="watch-item" key={name}>
+                            <span>{name}</span>
+                            <button onClick={() => removeWatch(p, kind, name)}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="watch-add-row">
+                        <input
+                          type="text"
+                          placeholder="Add a player"
+                          value={watchDraft[key] || ""}
+                          onChange={(e) => setWatchDraft({ ...watchDraft, [key]: e.target.value })}
+                          onKeyDown={(e) => e.key === "Enter" && addWatch(p, kind)}
+                        />
+                        <button className="btn primary" onClick={() => addWatch(p, kind)}>
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {tab === "propose" && (
+        <div>
+          <div className="card">
+            <p className="section-label">Need an idea?</p>
+            <div className="bet-note" style={{ marginBottom: 4 }}>
+              Type a player to see comparables ±5 spots at the same position — click one to
+              start a bet title. Rankings are snapshotted directly from FantasyPros' half-PPR
+              expert consensus rankings as of Aug 12, 2026 — ask to have them refreshed anytime.
+            </div>
+            {fireIceMatchups.length > 0 && (
+              <div className="idea-nearby-list" style={{ marginBottom: 4 }}>
+                <div className="bet-meta">Straight from Ice & Fire — someone's high, someone's fading:</div>
+                {fireIceMatchups.map((m, i) => (
+                  <div className="idea-nearby-row" key={i}>
+                    <span>
+                      <span className="idea-nearby-name">{m.name}</span>
+                      <span className="idea-watch-tag fire">🔥 {m.firePerson}</span>
+                      <span className="idea-watch-tag ice">❄️ {m.icePerson}</span>
+                    </span>
+                    <button className="btn primary" onClick={() => useMatchupIdea(m)}>
+                      Start bet
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="idea-input-row">
+              <input
+                type="text"
+                list="idea-players"
+                placeholder="e.g. Ladd McConkey"
+                value={ideaQuery}
+                onChange={(e) => setIdeaQuery(e.target.value)}
+              />
+            </div>
+            <datalist id="idea-players">
+              {RANKINGS.map((p) => (
+                <option key={p.name} value={p.name} />
+              ))}
+            </datalist>
+            {ideaQuery.trim() && !ideaResult && (
+              <div className="bet-note" style={{ marginTop: 10 }}>
+                No match for "{ideaQuery}" — try the exact spelling, or add a player idea
+                manually below.
+              </div>
+            )}
+            {ideaResult && (
+              <div className="idea-nearby-list">
+                <div className="bet-meta" style={{ marginTop: 8 }}>
+                  {ideaResult.target.name} — {ideaResult.target.pos}{ideaResult.target.rank} overall at position
+                  {watchTagsFor(ideaResult.target.name).map((t, i) => (
+                    <span className={"idea-watch-tag " + t.kind} key={i}>
+                      {t.kind === "fire" ? "🔥" : "❄️"} {t.person}
+                    </span>
+                  ))}
+                </div>
+                {ideaResult.nearby.map((n) => {
+                  const tags = watchTagsFor(n.name);
+                  return (
+                    <div className="idea-nearby-row" key={n.name}>
+                      <span>
+                        <span className="idea-nearby-name">{n.name}</span>
+                        <span className="idea-nearby-rank">
+                          {n.pos}{n.rank} · {n.rank > ideaResult.target.rank ? "+" : ""}
+                          {n.rank - ideaResult.target.rank}
+                        </span>
+                        {tags.map((t, i) => (
+                          <span className={"idea-watch-tag " + t.kind} key={i}>
+                            {t.kind === "fire" ? "🔥" : "❄️"} {t.person}
+                          </span>
+                        ))}
+                      </span>
+                      <button className="btn primary" onClick={() => useIdea(n.name)}>
+                        Use vs {n.name.split(" ").slice(-1)[0]}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {proposedBets.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <p className="section-label">Waiting on an answer</p>
+              {proposedBets.map((bet) => (
+                <div className="card" key={bet.id}>
+                  <div className="bet-head">
+                    <div>
+                      <p className="bet-title">{bet.title}</p>
+                      {bet.note && <div className="bet-note">{bet.note}</div>}
+                      <div className="bet-meta">
+                        Proposed by {bet.createdBy} · {bet.season} season
+                      </div>
+                    </div>
+                    <Stamp status="proposed" />
+                  </div>
+                  <div className="sides-row">
+                    {PEOPLE.map((p) => (
+                      <span className={"side-pill" + (bet.sides[p].in ? "" : " skip")} key={p}>
+                        <Chip person={p} />
+                        {bet.sides[p].in ? bet.sides[p].pick : "sitting out"}
+                        {bet.sides[p].in && (
+                          <span
+                            className="outcome-tag"
+                            style={
+                              bet.sides[p].accepted
+                                ? { background: "rgba(111,207,122,0.18)", color: "#6FCF7A" }
+                                : { background: "rgba(255,210,0,0.15)", color: "#FFD200" }
+                            }
+                          >
+                            {bet.sides[p].accepted ? "in" : "waiting"}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="accept-list">
+                  {PEOPLE.filter((p) => bet.sides[p].in && !bet.sides[p].accepted).map((p) => (
+                    <div className="accept-row" key={p}>
+                      <Chip person={p} />
+                      <input
+                        type="text"
+                        placeholder={`${p}'s pick`}
+                        value={getAcceptDraft(bet, p)}
+                        onChange={(e) => setAcceptDraft(bet.id, p, e.target.value)}
+                      />
+                      <button
+                        className="btn primary"
+                        disabled={!getAcceptDraft(bet, p).trim()}
+                        onClick={() => accept(bet.id, p)}
+                      >
+                        Accept
+                      </button>
+                      <button className="btn danger" onClick={() => decline(bet.id, p)}>
+                        Decline
+                      </button>
+                    </div>
+                  ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="section-label">New bet</p>
+          <div className="card form-grid">
+          <label>Bet</label>
+          <input
+            type="text"
+            placeholder='e.g. "CMC vs Bijan — most PPR points wk 12"'
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+          />
+          <label>Note (optional)</label>
+          <textarea
+            placeholder="Any extra context, void conditions, etc."
+            value={form.note}
+            onChange={(e) => setForm({ ...form, note: e.target.value })}
+          />
+          <div className="two-col">
+            <div>
+              <label>Season</label>
+              <div className="season-locked">{form.season} (current)</div>
+            </div>
+            <div>
+              <label>Stake, $ a side</label>
+              <input
+                type="number"
+                placeholder="1"
+                value={form.stake}
+                onChange={(e) => setForm({ ...form, stake: e.target.value })}
+              />
+            </div>
+          </div>
+          <label>Type</label>
+          <div className="mode-toggle">
+            <button
+              className={form.mode === "log" ? "on" : ""}
+              onClick={() => setForm({ ...form, mode: "log" })}
+            >
+              Already agreed — log it
+            </button>
+            <button
+              className={form.mode === "propose" ? "on" : ""}
+              onClick={() => setForm({ ...form, mode: "propose" })}
+            >
+              Propose — needs acceptance
+            </button>
+          </div>
+          {form.mode === "propose" && (
+            <>
+              <label>Proposed by</label>
+              <select
+                value={form.proposer}
+                onChange={(e) => setForm({ ...form, proposer: e.target.value })}
+              >
+                {PEOPLE.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+            </>
+          )}
+          <label>Sides</label>
+          {PEOPLE.map((p) => (
+            <div className="person-row" key={p}>
+              <Chip person={p} />
+              <strong style={{ width: 62, fontSize: 13 }}>{p}</strong>
+              {form.sides[p].in ? (
+                <input
+                  type="text"
+                  placeholder={
+                    form.mode === "propose" && p !== form.proposer
+                      ? "optional — they'll set this when they accept"
+                      : "their pick / position on the bet"
+                  }
+                  value={form.sides[p].pick}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      sides: { ...form.sides, [p]: { ...form.sides[p], pick: e.target.value } },
+                    })
+                  }
+                />
+              ) : (
+                <span style={{ flex: 1, color: "#5A5A5A", fontSize: 12.5 }}>sitting this one out</span>
+              )}
+              <span
+                className={"skip-toggle" + (!form.sides[p].in ? " active" : "")}
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    sides: { ...form.sides, [p]: { ...form.sides[p], in: !form.sides[p].in } },
+                  })
+                }
+              >
+                {form.sides[p].in ? "Skip" : "Back in"}
+              </span>
+            </div>
+          ))}
+          <div className="submit-row">
+            <button
+              className="btn primary"
+              disabled={!form.title.trim() || PEOPLE.filter((p) => form.sides[p].in).length < 2}
+              onClick={submitBet}
+            >
+              {form.mode === "log" ? "Add to board" : "Send proposal"}
+            </button>
+          </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<BoardBetTracker />);
+</script>
+</body>
+</html>
