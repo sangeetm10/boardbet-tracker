@@ -903,21 +903,6 @@ function BoardBetTracker() {
       return [`Top ${form.topX}`, `Not top ${form.topX}`];
     return null;
   }
-  const [ideaQuery, setIdeaQuery] = useState("");
-  const ideaResult = useMemo(
-    () => (ideaQuery.trim() ? findNearby(ideaQuery, 5) : null),
-    [ideaQuery]
-  );
-  function useIdea(otherName) {
-    setForm((f) => ({
-      ...f,
-      category: "h2h",
-      playerA: ideaResult.target.name,
-      playerB: otherName,
-      title: `${ideaResult.target.name} vs ${otherName}`,
-      sides: resetSidesPicks(f.sides),
-    }));
-  }
   const fireIceMatchups = useMemo(() => {
     const matches = [];
     const seen = new Set();
@@ -1246,6 +1231,43 @@ function BoardBetTracker() {
     persist([...missingHistory, ...bets]);
     setTab("history");
   }
+  // Comparable-player suggestions for the H2H "Player B" field — same position
+  // as Player A, ±5 spots, as a starting point (Player B itself still accepts
+  // any player at that position, not just these).
+  const playerAIdea =
+    form.category === "h2h" && form.playerA.trim() ? findNearby(form.playerA, 5) : null;
+  // History bets bucketed by season, newest first (historyBets is already
+  // sorted season-desc so grouping preserves that order).
+  const historyGroups = [];
+  historyBets.forEach((bet) => {
+    const season = bet.season || "Unknown";
+    let group = historyGroups.find((g) => g.season === season);
+    if (!group) {
+      group = { season, bets: [] };
+      historyGroups.push(group);
+    }
+    group.bets.push(bet);
+  });
+  const mostRecentHistorySeason = historyGroups[0]?.season;
+  const [collapsedYears, setCollapsedYears] = useState({});
+  function isYearCollapsed(season) {
+    return collapsedYears[season] !== undefined
+      ? collapsedYears[season]
+      : season !== mostRecentHistorySeason;
+  }
+  function toggleYear(season) {
+    setCollapsedYears({ ...collapsedYears, [season]: !isYearCollapsed(season) });
+  }
+  function expandAllYears() {
+    const next = {};
+    historyGroups.forEach((g) => (next[g.season] = false));
+    setCollapsedYears(next);
+  }
+  function collapseAllYears() {
+    const next = {};
+    historyGroups.forEach((g) => (next[g.season] = true));
+    setCollapsedYears(next);
+  }
   const css = `
     .bbt { background:#0A0A0A; min-height:100%; color:#ECE7DA; font-family:'Inter',sans-serif; padding:20px 16px 48px; }
     .bbt * { box-sizing:border-box; }
@@ -1300,6 +1322,15 @@ function BoardBetTracker() {
     .pick-choice-row { display:flex; gap:6px; flex:1; min-width:160px; }
     .pick-choice-btn { flex:1; padding:7px 8px; border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:#0A0A0A; color:#9A9A9A; font-size:12px; cursor:pointer; text-align:center; font-family:'Inter',sans-serif; }
     .pick-choice-btn.on { border-color:#FFD200; color:#FFD200; background:rgba(255,210,0,0.08); }
+    .year-controls { display:flex; justify-content:flex-end; gap:8px; margin-bottom:10px; }
+    .year-controls button { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; text-transform:uppercase; background:none; border:1px solid rgba(255,255,255,0.14); color:#9A9A9A; border-radius:4px; padding:5px 9px; cursor:pointer; }
+    .year-controls button:hover { border-color:#FFD200; color:#FFD200; }
+    .year-header { display:flex; align-items:center; gap:8px; cursor:pointer; padding:10px 2px; user-select:none; }
+    .year-header:hover .year-title { color:#FFD200; }
+    .year-chevron { font-size:11px; color:#6B6B6B; transition:transform 0.15s; }
+    .year-chevron.open { transform:rotate(90deg); }
+    .year-title { font-family:'Teko',sans-serif; font-size:22px; font-weight:600; letter-spacing:0.5px; }
+    .year-count { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#6B6B6B; }
     .person-row { display:flex; align-items:center; gap:10px; margin-top:10px; background:#0F0F0F; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; }
     .person-row input[type=text] { flex:1; background:#0A0A0A; border:1px solid rgba(255,255,255,0.12); border-radius:5px; padding:7px 9px; color:#ECE7DA; font-size:13px; }
     .skip-toggle { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; color:#9A9A9A; cursor:pointer; user-select:none; padding:5px 8px; border:1px solid rgba(255,255,255,0.12); border-radius:4px; white-space:nowrap; }
@@ -1410,6 +1441,13 @@ function BoardBetTracker() {
           <option key={p.name} value={p.name} />
         ))}
       </datalist>
+      {["QB", "RB", "WR", "TE"].map((pos) => (
+        <datalist id={"players-" + pos} key={pos}>
+          {RANKINGS.filter((p) => p.pos === pos).map((p) => (
+            <option key={p.name} value={p.name} />
+          ))}
+        </datalist>
+      ))}
       {tab === "active" && (
         <div>
           {staleActive.length > 0 && (
@@ -1698,34 +1736,55 @@ function BoardBetTracker() {
           {historyBets.length === 0 && (
             <div className="empty">No settled or voided bets yet.</div>
           )}
-          {historyBets.map((bet) => (
-            <div className="card" key={bet.id}>
-              <div className="bet-head">
-                <div>
-                  <p className="bet-title">{bet.title}</p>
-                  {bet.note && <div className="bet-note">{bet.note}</div>}
-                  <div className="bet-meta">
-                    {bet.season} season{bet.stake ? ` · $${bet.stake} a side` : ""}
-                  </div>
-                </div>
-                <Stamp status={bet.status} />
-              </div>
-              <div className="sides-row">
-                {PEOPLE.map((p) => (
-                  <span className={"side-pill" + (bet.sides[p].in ? "" : " skip")} key={p}>
-                    <Chip person={p} />
-                    {bet.sides[p].in ? bet.sides[p].pick : "sitting out"}
-                    {bet.status === "resolved" && bet.sides[p].in && bet.outcomes[p] && (
-                      <span className={"outcome-tag outcome-" + bet.outcomes[p]}>
-                        {bet.outcomes[p].toUpperCase()}
-                      </span>
-                    )}
-                  </span>
-                ))}
-              </div>
-              {bet.status === "void" && <div className="void-note">Voided — {bet.voidReason}</div>}
+          {historyGroups.length > 1 && (
+            <div className="year-controls">
+              <button onClick={expandAllYears}>Expand all</button>
+              <button onClick={collapseAllYears}>Collapse all</button>
             </div>
-          ))}
+          )}
+          {historyGroups.map((group) => {
+            const collapsed = isYearCollapsed(group.season);
+            return (
+              <div key={group.season}>
+                <div className="year-header" onClick={() => toggleYear(group.season)}>
+                  <span className={"year-chevron" + (collapsed ? "" : " open")}>▸</span>
+                  <span className="year-title">{group.season} season</span>
+                  <span className="year-count">({group.bets.length})</span>
+                </div>
+                {!collapsed &&
+                  group.bets.map((bet) => (
+                    <div className="card" key={bet.id}>
+                      <div className="bet-head">
+                        <div>
+                          <p className="bet-title">{bet.title}</p>
+                          {bet.note && <div className="bet-note">{bet.note}</div>}
+                          <div className="bet-meta">
+                            {bet.season} season{bet.stake ? ` · $${bet.stake} a side` : ""}
+                          </div>
+                        </div>
+                        <Stamp status={bet.status} />
+                      </div>
+                      <div className="sides-row">
+                        {PEOPLE.map((p) => (
+                          <span className={"side-pill" + (bet.sides[p].in ? "" : " skip")} key={p}>
+                            <Chip person={p} />
+                            {bet.sides[p].in ? bet.sides[p].pick : "sitting out"}
+                            {bet.status === "resolved" && bet.sides[p].in && bet.outcomes[p] && (
+                              <span className={"outcome-tag outcome-" + bet.outcomes[p]}>
+                                {bet.outcomes[p].toUpperCase()}
+                              </span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                      {bet.status === "void" && (
+                        <div className="void-note">Voided — {bet.voidReason}</div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            );
+          })}
         </div>
       )}
       {tab === "standings" && (
@@ -1930,15 +1989,10 @@ function BoardBetTracker() {
       )}
       {tab === "propose" && (
         <div>
-          <div className="card">
-            <p className="section-label">Need an idea?</p>
-            <div className="bet-note" style={{ marginBottom: 4 }}>
-              Type a player to see comparables ±5 spots at the same position — click one to
-              start a bet title. Rankings are snapshotted directly from FantasyPros' half-PPR
-              expert consensus rankings as of Aug 12, 2026 — ask to have them refreshed anytime.
-            </div>
-            {fireIceMatchups.length > 0 && (
-              <div className="idea-nearby-list" style={{ marginBottom: 4 }}>
+          {fireIceMatchups.length > 0 && (
+            <div className="card">
+              <p className="section-label">Need an idea?</p>
+              <div className="idea-nearby-list">
                 <div className="bet-meta">Straight from Ice & Fire — someone's high, someone's fading:</div>
                 {fireIceMatchups.map((m, i) => (
                   <div className="idea-nearby-row" key={i}>
@@ -1953,57 +2007,8 @@ function BoardBetTracker() {
                   </div>
                 ))}
               </div>
-            )}
-            <div className="idea-input-row">
-              <input
-                type="text"
-                list="idea-players"
-                placeholder="e.g. Ladd McConkey"
-                value={ideaQuery}
-                onChange={(e) => setIdeaQuery(e.target.value)}
-              />
             </div>
-            {ideaQuery.trim() && !ideaResult && (
-              <div className="bet-note" style={{ marginTop: 10 }}>
-                No match for "{ideaQuery}" — try the exact spelling, or add a player idea
-                manually below.
-              </div>
-            )}
-            {ideaResult && (
-              <div className="idea-nearby-list">
-                <div className="bet-meta" style={{ marginTop: 8 }}>
-                  {ideaResult.target.name} — {ideaResult.target.pos}{ideaResult.target.rank} overall at position
-                  {watchTagsFor(ideaResult.target.name).map((t, i) => (
-                    <span className={"idea-watch-tag " + t.kind} key={i}>
-                      {t.kind === "fire" ? "🔥" : "❄️"} {t.person}
-                    </span>
-                  ))}
-                </div>
-                {ideaResult.nearby.map((n) => {
-                  const tags = watchTagsFor(n.name);
-                  return (
-                    <div className="idea-nearby-row" key={n.name}>
-                      <span>
-                        <span className="idea-nearby-name">{n.name}</span>
-                        <span className="idea-nearby-rank">
-                          {n.pos}{n.rank} · {n.rank > ideaResult.target.rank ? "+" : ""}
-                          {n.rank - ideaResult.target.rank}
-                        </span>
-                        {tags.map((t, i) => (
-                          <span className={"idea-watch-tag " + t.kind} key={i}>
-                            {t.kind === "fire" ? "🔥" : "❄️"} {t.person}
-                          </span>
-                        ))}
-                      </span>
-                      <button className="btn primary" onClick={() => useIdea(n.name)}>
-                        Use vs {n.name.split(" ").slice(-1)[0]}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          )}
           {proposedBets.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <p className="section-label">Waiting on an answer</p>
@@ -2118,7 +2123,7 @@ function BoardBetTracker() {
                   <label>Player B</label>
                   <input
                     type="text"
-                    list="idea-players"
+                    list={playerAIdea ? "players-" + playerAIdea.target.pos : "idea-players"}
                     placeholder="e.g. Lamar Jackson"
                     value={form.playerB}
                     onChange={(e) => {
@@ -2129,6 +2134,51 @@ function BoardBetTracker() {
                   />
                 </div>
               </div>
+              {playerAIdea && playerAIdea.nearby.length > 0 && (
+                <div className="idea-nearby-list" style={{ marginTop: 8 }}>
+                  <div className="bet-meta">
+                    Comparable {playerAIdea.target.pos}s near {playerAIdea.target.name} (±5) — a
+                    starting point, not a limit. Any {playerAIdea.target.pos} in the list works for
+                    Player B.
+                  </div>
+                  {playerAIdea.nearby.map((n) => {
+                    const tags = watchTagsFor(n.name);
+                    return (
+                      <div className="idea-nearby-row" key={n.name}>
+                        <span>
+                          <span className="idea-nearby-name">{n.name}</span>
+                          <span className="idea-nearby-rank">
+                            {n.pos}{n.rank} · {n.rank > playerAIdea.target.rank ? "+" : ""}
+                            {n.rank - playerAIdea.target.rank}
+                          </span>
+                          {tags.map((t, i) => (
+                            <span className={"idea-watch-tag " + t.kind} key={i}>
+                              {t.kind === "fire" ? "🔥" : "❄️"} {t.person}
+                            </span>
+                          ))}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn primary"
+                          onClick={() => {
+                            const title = form.playerA
+                              ? `${form.playerA} vs ${n.name}`
+                              : form.title;
+                            setForm({
+                              ...form,
+                              playerB: n.name,
+                              title,
+                              sides: resetSidesPicks(form.sides),
+                            });
+                          }}
+                        >
+                          Use {n.name.split(" ").slice(-1)[0]}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
           {form.category === "topx" && (
