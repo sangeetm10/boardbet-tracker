@@ -1231,11 +1231,13 @@ function BoardBetTracker() {
     persist([...missingHistory, ...bets]);
     setTab("history");
   }
-  // Comparable-player suggestions for the H2H "Player B" field — same position
-  // as Player A, ±5 spots, as a starting point (Player B itself still accepts
-  // any player at that position, not just these).
-  const playerAIdea =
-    form.category === "h2h" && form.playerA.trim() ? findNearby(form.playerA, 5) : null;
+  // Once Player A resolves to a known player, filter Player B's suggestions
+  // to the same position — the datalist options themselves show each
+  // player's positional rank (e.g. "WR17") so nearby names are easy to spot.
+  const playerAMatch =
+    form.category === "h2h" && form.playerA.trim()
+      ? RANKINGS.find((p) => p.name.toLowerCase() === form.playerA.trim().toLowerCase())
+      : null;
   // History bets bucketed by season, newest first (historyBets is already
   // sorted season-desc so grouping preserves that order).
   const historyGroups = [];
@@ -1438,13 +1440,17 @@ function BoardBetTracker() {
       </div>
       <datalist id="idea-players">
         {RANKINGS.map((p) => (
-          <option key={p.name} value={p.name} />
+          <option key={p.name} value={p.name}>
+            {p.name} — {p.pos}{p.rank}
+          </option>
         ))}
       </datalist>
       {["QB", "RB", "WR", "TE"].map((pos) => (
         <datalist id={"players-" + pos} key={pos}>
           {RANKINGS.filter((p) => p.pos === pos).map((p) => (
-            <option key={p.name} value={p.name} />
+            <option key={p.name} value={p.name}>
+              {p.name} — {p.pos}{p.rank}
+            </option>
           ))}
         </datalist>
       ))}
@@ -2103,83 +2109,36 @@ function BoardBetTracker() {
             </button>
           </div>
           {form.category === "h2h" && (
-            <>
-              <div className="two-col">
-                <div>
-                  <label>Player A</label>
-                  <input
-                    type="text"
-                    list="idea-players"
-                    placeholder="e.g. Josh Allen"
-                    value={form.playerA}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      const title = v && form.playerB ? `${v} vs ${form.playerB}` : form.title;
-                      setForm({ ...form, playerA: v, title, sides: resetSidesPicks(form.sides) });
-                    }}
-                  />
-                </div>
-                <div>
-                  <label>Player B</label>
-                  <input
-                    type="text"
-                    list={playerAIdea ? "players-" + playerAIdea.target.pos : "idea-players"}
-                    placeholder="e.g. Lamar Jackson"
-                    value={form.playerB}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      const title = form.playerA && v ? `${form.playerA} vs ${v}` : form.title;
-                      setForm({ ...form, playerB: v, title, sides: resetSidesPicks(form.sides) });
-                    }}
-                  />
-                </div>
+            <div className="two-col">
+              <div>
+                <label>Player A</label>
+                <input
+                  type="text"
+                  list="idea-players"
+                  placeholder="e.g. Josh Allen"
+                  value={form.playerA}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const title = v && form.playerB ? `${v} vs ${form.playerB}` : form.title;
+                    setForm({ ...form, playerA: v, title, sides: resetSidesPicks(form.sides) });
+                  }}
+                />
               </div>
-              {playerAIdea && playerAIdea.nearby.length > 0 && (
-                <div className="idea-nearby-list" style={{ marginTop: 8 }}>
-                  <div className="bet-meta">
-                    Comparable {playerAIdea.target.pos}s near {playerAIdea.target.name} (±5) — a
-                    starting point, not a limit. Any {playerAIdea.target.pos} in the list works for
-                    Player B.
-                  </div>
-                  {playerAIdea.nearby.map((n) => {
-                    const tags = watchTagsFor(n.name);
-                    return (
-                      <div className="idea-nearby-row" key={n.name}>
-                        <span>
-                          <span className="idea-nearby-name">{n.name}</span>
-                          <span className="idea-nearby-rank">
-                            {n.pos}{n.rank} · {n.rank > playerAIdea.target.rank ? "+" : ""}
-                            {n.rank - playerAIdea.target.rank}
-                          </span>
-                          {tags.map((t, i) => (
-                            <span className={"idea-watch-tag " + t.kind} key={i}>
-                              {t.kind === "fire" ? "🔥" : "❄️"} {t.person}
-                            </span>
-                          ))}
-                        </span>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          onClick={() => {
-                            const title = form.playerA
-                              ? `${form.playerA} vs ${n.name}`
-                              : form.title;
-                            setForm({
-                              ...form,
-                              playerB: n.name,
-                              title,
-                              sides: resetSidesPicks(form.sides),
-                            });
-                          }}
-                        >
-                          Use {n.name.split(" ").slice(-1)[0]}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
+              <div>
+                <label>Player B</label>
+                <input
+                  type="text"
+                  list={playerAMatch ? "players-" + playerAMatch.pos : "idea-players"}
+                  placeholder="e.g. Lamar Jackson"
+                  value={form.playerB}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const title = form.playerA && v ? `${form.playerA} vs ${v}` : form.title;
+                    setForm({ ...form, playerB: v, title, sides: resetSidesPicks(form.sides) });
+                  }}
+                />
+              </div>
+            </div>
           )}
           {form.category === "topx" && (
             <div className="two-col">
