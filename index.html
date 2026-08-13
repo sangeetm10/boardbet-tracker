@@ -1441,7 +1441,7 @@ function BoardBetTracker() {
       <datalist id="idea-players">
         {RANKINGS.map((p) => (
           <option key={p.name} value={p.name}>
-            {p.name} — {p.pos}{p.rank}
+            {p.pos}{p.rank}
           </option>
         ))}
       </datalist>
@@ -1449,7 +1449,7 @@ function BoardBetTracker() {
         <datalist id={"players-" + pos} key={pos}>
           {RANKINGS.filter((p) => p.pos === pos).map((p) => (
             <option key={p.name} value={p.name}>
-              {p.name} — {p.pos}{p.rank}
+              {p.pos}{p.rank}
             </option>
           ))}
         </datalist>
@@ -1944,8 +1944,9 @@ function BoardBetTracker() {
       {tab === "watchlist" && (
         <div>
           <p className="bet-note" style={{ marginBottom: 12 }}>
-            ❄️ Ice = guys you want to fade. 🔥 Fire = guys you're high on and want to back. Use
-            these to spot natural bet matchups — check the idea generator on the Propose tab.
+            ❄️ Ice = guys you want to fade. 🔥 Fire = guys you're high on and want to back. When
+            two people disagree on the same player, it'll surface as a suggestion on the Propose
+            tab.
           </p>
           <div className="watch-grid">
             {PEOPLE.map((p) => (
