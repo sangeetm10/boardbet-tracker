@@ -977,15 +977,48 @@ function BoardBetTracker() {
   const fireIceMatchups = useMemo(() => {
     const matches = [];
     const seen = new Set();
+    // Two different people fire on two different same-position players — a
+    // ready-made head-to-head ("whose guy finishes better?"). Surfaced first
+    // since it's a complete bet, not just a starting point.
+    for (let i = 0; i < PEOPLE.length; i++) {
+      for (let j = i + 1; j < PEOPLE.length; j++) {
+        const pA = PEOPLE[i];
+        const pB = PEOPLE[j];
+        const firesA = (watchlists[pA]?.fire || [])
+          .map((n) => RANKINGS.find((p) => p.name.toLowerCase() === n.toLowerCase()))
+          .filter(Boolean);
+        const firesB = (watchlists[pB]?.fire || [])
+          .map((n) => RANKINGS.find((p) => p.name.toLowerCase() === n.toLowerCase()))
+          .filter(Boolean);
+        firesA.forEach((a) => {
+          firesB.forEach((b) => {
+            if (a.pos !== b.pos || a.name.toLowerCase() === b.name.toLowerCase()) return;
+            const key = "h2h::" + [a.name.toLowerCase(), b.name.toLowerCase()].sort().join("::");
+            if (!seen.has(key)) {
+              seen.add(key);
+              matches.push({
+                type: "h2h",
+                playerA: a.name,
+                personA: pA,
+                playerB: b.name,
+                personB: pB,
+              });
+            }
+          });
+        });
+      }
+    }
+    // Someone's fire vs someone else's ice on the same player — only one
+    // named player, so it's a starting point rather than a full bet.
     PEOPLE.forEach((pFire) => {
       (watchlists[pFire]?.fire || []).forEach((name) => {
         PEOPLE.forEach((pIce) => {
           if (pIce === pFire) return;
           if ((watchlists[pIce]?.ice || []).some((n) => n.toLowerCase() === name.toLowerCase())) {
-            const key = name.toLowerCase() + "::" + pFire + "::" + pIce;
+            const key = "clash::" + name.toLowerCase() + "::" + pFire + "::" + pIce;
             if (!seen.has(key)) {
               seen.add(key);
-              matches.push({ name, firePerson: pFire, icePerson: pIce });
+              matches.push({ type: "clash", name, firePerson: pFire, icePerson: pIce });
             }
           }
         });
@@ -994,11 +1027,27 @@ function BoardBetTracker() {
     return matches;
   }, [watchlists]);
   function useMatchupIdea(m) {
-    setForm((f) => ({
-      ...f,
-      title: `${m.name} — buy or fade?`,
-      note: `${m.firePerson} is high on him (🔥), ${m.icePerson} wants to fade (❄️).`,
-    }));
+    if (m.type === "h2h") {
+      setForm((f) => ({
+        ...f,
+        category: "h2h",
+        playerA: m.playerA,
+        playerB: m.playerB,
+        title: `${m.playerA} vs ${m.playerB}`,
+        note: `${m.personA} is high on ${m.playerA} (🔥), ${m.personB} is high on ${m.playerB} (🔥).`,
+        sides: resetSidesPicks(f.sides),
+      }));
+    } else {
+      setForm((f) => ({
+        ...f,
+        category: "h2h",
+        playerA: m.name,
+        playerB: "",
+        title: `${m.name} — buy or fade?`,
+        note: `${m.firePerson} is high on him (🔥), ${m.icePerson} wants to fade (❄️).`,
+        sides: resetSidesPicks(f.sides),
+      }));
+    }
   }
   useEffect(() => {
     const unsub = boardDocRef.onSnapshot(
@@ -1305,11 +1354,16 @@ function BoardBetTracker() {
     setTab("history");
   }
   // Once Player A resolves to a known player, filter Player B's suggestions
-  // to the same position — the datalist options themselves show each
-  // player's positional rank (e.g. "WR17") so nearby names are easy to spot.
+  // to the same position (and vice versa, whichever gets picked first) — the
+  // picker itself shows each player's positional rank (e.g. "WR17") so
+  // nearby names are easy to spot.
   const playerAMatch =
     form.category === "h2h" && form.playerA.trim()
       ? RANKINGS.find((p) => p.name.toLowerCase() === form.playerA.trim().toLowerCase())
+      : null;
+  const playerBMatch =
+    form.category === "h2h" && form.playerB.trim()
+      ? RANKINGS.find((p) => p.name.toLowerCase() === form.playerB.trim().toLowerCase())
       : null;
   // History bets bucketed by season, newest first (historyBets is already
   // sorted season-desc so grouping preserves that order).
@@ -1404,7 +1458,7 @@ function BoardBetTracker() {
     .player-picker-opt .ppo-name { color:#ECE7DA; }
     .player-picker-opt .ppo-rank { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#9A9A9A; white-space:nowrap; }
     .player-picker-empty { padding:8px 10px; font-size:12px; color:#5A5A5A; }
-    .rankings-note { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#6B6B6B; margin:-4px 0 12px; }
+    .rankings-note { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#6B6B6B; margin:10px 0 12px; }
     .year-controls { display:flex; justify-content:flex-end; gap:8px; margin-bottom:10px; }
     .year-controls button { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; text-transform:uppercase; background:none; border:1px solid rgba(255,255,255,0.14); color:#9A9A9A; border-radius:4px; padding:5px 9px; cursor:pointer; }
     .year-controls button:hover { border-color:#FFD200; color:#FFD200; }
@@ -2067,13 +2121,21 @@ function BoardBetTracker() {
                 <div className="bet-meta">Straight from Ice & Fire — someone's high, someone's fading:</div>
                 {fireIceMatchups.map((m, i) => (
                   <div className="idea-nearby-row" key={i}>
-                    <span>
-                      <span className="idea-nearby-name">{m.name}</span>
-                      <span className="idea-watch-tag fire">🔥 {m.firePerson}</span>
-                      <span className="idea-watch-tag ice">❄️ {m.icePerson}</span>
-                    </span>
+                    {m.type === "h2h" ? (
+                      <span>
+                        <span className="idea-nearby-name">{m.playerA} vs {m.playerB}</span>
+                        <span className="idea-watch-tag fire">🔥 {m.personA}</span>
+                        <span className="idea-watch-tag fire">🔥 {m.personB}</span>
+                      </span>
+                    ) : (
+                      <span>
+                        <span className="idea-nearby-name">{m.name}</span>
+                        <span className="idea-watch-tag fire">🔥 {m.firePerson}</span>
+                        <span className="idea-watch-tag ice">❄️ {m.icePerson}</span>
+                      </span>
+                    )}
                     <button className="btn primary" onClick={() => useMatchupIdea(m)}>
-                      Start bet
+                      {m.type === "h2h" ? "Start bet — both picks filled in" : "Start bet"}
                     </button>
                   </div>
                 ))}
@@ -2187,6 +2249,7 @@ function BoardBetTracker() {
                 <label>Player A</label>
                 <PlayerPicker
                   placeholder="e.g. Josh Allen"
+                  positionFilter={playerBMatch ? playerBMatch.pos : null}
                   value={form.playerA}
                   onChange={(v) => {
                     const title = v && form.playerB ? `${v} vs ${form.playerB}` : form.title;
