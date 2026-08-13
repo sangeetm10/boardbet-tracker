@@ -62,6 +62,29 @@ const emptySides = () => ({
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
+function resetSidesPicks(sides) {
+  const next = {};
+  PEOPLE.forEach((p) => (next[p] = { ...sides[p], pick: "" }));
+  return next;
+}
+// Pick options for a bet already on the board — H2H offers the two named
+// players, Top X offers the two sides of the threshold. Freeform (or an
+// incompletely-configured H2H/Top X bet) returns null, meaning "use free text".
+function pickOptionsFor(bet) {
+  if (bet.category === "h2h" && bet.playerA && bet.playerB) return [bet.playerA, bet.playerB];
+  if (bet.category === "topx" && bet.topPlayer && bet.topX)
+    return [`Top ${bet.topX}`, `Not top ${bet.topX}`];
+  return null;
+}
+// Individual "Enter result" only opens once Week 17 of a bet's season has
+// wrapped (roughly Jan 5 of the following year) — before that there's nothing
+// to grade yet. Older/stale-season bets are always unlocked.
+function resolveUnlocked(season) {
+  const year = Number(season);
+  if (!year) return true;
+  const unlock = new Date(year + 1, 0, 5);
+  return new Date() >= unlock;
+}
 // Historical bets reconstructed from the old sheet (2016-2022).
 // Tuple format: [title, season, SangeetSlot, AdamSlot, JoshSlot]
 // Each slot is null (sat out) or [pick, outcome].
@@ -830,6 +853,22 @@ function Chip({ person }) {
     </span>
   );
 }
+function PickChoice({ options, value, onSelect }) {
+  return (
+    <div className="pick-choice-row">
+      {options.map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          className={"pick-choice-btn" + (value === opt ? " on" : "")}
+          onClick={() => onSelect(opt)}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
+}
 function BoardBetTracker() {
   const [bets, setBets] = useState([]);
   const [settlements, setSettlements] = useState([]);
@@ -851,14 +890,33 @@ function BoardBetTracker() {
     season: defaultSeason(),
     stake: "1",
     sides: emptySides(),
+    category: "h2h",
+    playerA: "",
+    playerB: "",
+    topPlayer: "",
+    topX: "",
   });
+  function formPickOptions() {
+    if (form.category === "h2h" && form.playerA.trim() && form.playerB.trim())
+      return [form.playerA.trim(), form.playerB.trim()];
+    if (form.category === "topx" && form.topPlayer.trim() && String(form.topX).trim())
+      return [`Top ${form.topX}`, `Not top ${form.topX}`];
+    return null;
+  }
   const [ideaQuery, setIdeaQuery] = useState("");
   const ideaResult = useMemo(
     () => (ideaQuery.trim() ? findNearby(ideaQuery, 5) : null),
     [ideaQuery]
   );
   function useIdea(otherName) {
-    setForm((f) => ({ ...f, title: `${ideaResult.target.name} vs ${otherName}` }));
+    setForm((f) => ({
+      ...f,
+      category: "h2h",
+      playerA: ideaResult.target.name,
+      playerB: otherName,
+      title: `${ideaResult.target.name} vs ${otherName}`,
+      sides: resetSidesPicks(f.sides),
+    }));
   }
   const fireIceMatchups = useMemo(() => {
     const matches = [];
@@ -990,6 +1048,11 @@ function BoardBetTracker() {
       season: defaultSeason(),
       stake: "1",
       sides: emptySides(),
+      category: "h2h",
+      playerA: "",
+      playerB: "",
+      topPlayer: "",
+      topX: "",
     });
   }
   function submitBet() {
@@ -1023,6 +1086,11 @@ function BoardBetTracker() {
       voidReason: null,
       outcomes: {},
       settled: false,
+      category: form.category,
+      playerA: form.category === "h2h" ? form.playerA.trim() || null : null,
+      playerB: form.category === "h2h" ? form.playerB.trim() || null : null,
+      topPlayer: form.category === "topx" ? form.topPlayer.trim() || null : null,
+      topX: form.category === "topx" ? String(form.topX).trim() || null : null,
     };
     persist([bet, ...bets], settlements);
     resetForm();
@@ -1229,6 +1297,9 @@ function BoardBetTracker() {
     .mode-toggle { display:flex; gap:8px; margin-top:6px; }
     .mode-toggle button { flex:1; padding:9px; border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:#0F0F0F; color:#9A9A9A; font-size:12.5px; cursor:pointer; }
     .mode-toggle button.on { border-color:#FFD200; color:#FFD200; background:rgba(255,210,0,0.08); }
+    .pick-choice-row { display:flex; gap:6px; flex:1; min-width:160px; }
+    .pick-choice-btn { flex:1; padding:7px 8px; border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:#0A0A0A; color:#9A9A9A; font-size:12px; cursor:pointer; text-align:center; font-family:'Inter',sans-serif; }
+    .pick-choice-btn.on { border-color:#FFD200; color:#FFD200; background:rgba(255,210,0,0.08); }
     .person-row { display:flex; align-items:center; gap:10px; margin-top:10px; background:#0F0F0F; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; }
     .person-row input[type=text] { flex:1; background:#0A0A0A; border:1px solid rgba(255,255,255,0.12); border-radius:5px; padding:7px 9px; color:#ECE7DA; font-size:13px; }
     .skip-toggle { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.5px; color:#9A9A9A; cursor:pointer; user-select:none; padding:5px 8px; border:1px solid rgba(255,255,255,0.12); border-radius:4px; white-space:nowrap; }
@@ -1334,6 +1405,11 @@ function BoardBetTracker() {
           </button>
         ))}
       </div>
+      <datalist id="idea-players">
+        {RANKINGS.map((p) => (
+          <option key={p.name} value={p.name} />
+        ))}
+      </datalist>
       {tab === "active" && (
         <div>
           {staleActive.length > 0 && (
@@ -1417,21 +1493,31 @@ function BoardBetTracker() {
                       >
                         {p}'s pick (can only be set once — no changing it after)
                       </label>
-                      <input
-                        type="text"
-                        value={pickDraft}
-                        onChange={(e) => setPickDraft(e.target.value)}
-                        placeholder="their pick / position on the bet"
-                        style={{
-                          width: "100%",
-                          marginTop: 6,
-                          background: "#0A0A0A",
-                          border: "1px solid rgba(255,255,255,0.16)",
-                          borderRadius: 5,
-                          padding: 8,
-                          color: "#ECE7DA",
-                        }}
-                      />
+                      {pickOptionsFor(bet) ? (
+                        <div style={{ marginTop: 6 }}>
+                          <PickChoice
+                            options={pickOptionsFor(bet)}
+                            value={pickDraft}
+                            onSelect={setPickDraft}
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          value={pickDraft}
+                          onChange={(e) => setPickDraft(e.target.value)}
+                          placeholder="their pick / position on the bet"
+                          style={{
+                            width: "100%",
+                            marginTop: 6,
+                            background: "#0A0A0A",
+                            border: "1px solid rgba(255,255,255,0.16)",
+                            borderRadius: 5,
+                            padding: 8,
+                            color: "#ECE7DA",
+                          }}
+                        />
+                      )}
                       <div className="actions-row">
                         <button
                           className="btn primary"
@@ -1539,10 +1625,16 @@ function BoardBetTracker() {
                   </div>
                 </div>
               ) : (
-                <div className="actions-row">
-                  <button className="btn primary" onClick={() => openResolve(bet)}>
-                    Enter result
-                  </button>
+                <div className="actions-row" style={{ alignItems: "center" }}>
+                  {resolveUnlocked(bet.season) ? (
+                    <button className="btn primary" onClick={() => openResolve(bet)}>
+                      Enter result
+                    </button>
+                  ) : (
+                    <span className="bet-note" style={{ margin: 0 }}>
+                      Resolves after Week 17 ({bet.season} season)
+                    </span>
+                  )}
                   <button className="btn danger" onClick={() => openVoid(bet.id)}>
                     Void
                   </button>
@@ -1818,6 +1910,7 @@ function BoardBetTracker() {
                       <div className="watch-add-row">
                         <input
                           type="text"
+                          list="idea-players"
                           placeholder="Add a player"
                           value={watchDraft[key] || ""}
                           onChange={(e) => setWatchDraft({ ...watchDraft, [key]: e.target.value })}
@@ -1870,11 +1963,6 @@ function BoardBetTracker() {
                 onChange={(e) => setIdeaQuery(e.target.value)}
               />
             </div>
-            <datalist id="idea-players">
-              {RANKINGS.map((p) => (
-                <option key={p.name} value={p.name} />
-              ))}
-            </datalist>
             {ideaQuery.trim() && !ideaResult && (
               <div className="bet-note" style={{ marginTop: 10 }}>
                 No match for "{ideaQuery}" — try the exact spelling, or add a player idea
@@ -1955,12 +2043,20 @@ function BoardBetTracker() {
                   {PEOPLE.filter((p) => bet.sides[p].in && !bet.sides[p].accepted).map((p) => (
                     <div className="accept-row" key={p}>
                       <Chip person={p} />
-                      <input
-                        type="text"
-                        placeholder={`${p}'s pick`}
-                        value={getAcceptDraft(bet, p)}
-                        onChange={(e) => setAcceptDraft(bet.id, p, e.target.value)}
-                      />
+                      {pickOptionsFor(bet) ? (
+                        <PickChoice
+                          options={pickOptionsFor(bet)}
+                          value={getAcceptDraft(bet, p)}
+                          onSelect={(opt) => setAcceptDraft(bet.id, p, opt)}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder={`${p}'s pick`}
+                          value={getAcceptDraft(bet, p)}
+                          onChange={(e) => setAcceptDraft(bet.id, p, e.target.value)}
+                        />
+                      )}
                       <button
                         className="btn primary"
                         disabled={!getAcceptDraft(bet, p).trim()}
@@ -1980,6 +2076,92 @@ function BoardBetTracker() {
           )}
           <p className="section-label">New bet</p>
           <div className="card form-grid">
+          <label>Bet type</label>
+          <div className="mode-toggle">
+            <button
+              className={form.category === "h2h" ? "on" : ""}
+              onClick={() => setForm({ ...form, category: "h2h", sides: resetSidesPicks(form.sides) })}
+            >
+              Head to head
+            </button>
+            <button
+              className={form.category === "topx" ? "on" : ""}
+              onClick={() => setForm({ ...form, category: "topx", sides: resetSidesPicks(form.sides) })}
+            >
+              Top X
+            </button>
+            <button
+              className={form.category === "freeform" ? "on" : ""}
+              onClick={() => setForm({ ...form, category: "freeform", sides: resetSidesPicks(form.sides) })}
+            >
+              Freeform
+            </button>
+          </div>
+          {form.category === "h2h" && (
+            <>
+              <div className="two-col">
+                <div>
+                  <label>Player A</label>
+                  <input
+                    type="text"
+                    list="idea-players"
+                    placeholder="e.g. Josh Allen"
+                    value={form.playerA}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const title = v && form.playerB ? `${v} vs ${form.playerB}` : form.title;
+                      setForm({ ...form, playerA: v, title, sides: resetSidesPicks(form.sides) });
+                    }}
+                  />
+                </div>
+                <div>
+                  <label>Player B</label>
+                  <input
+                    type="text"
+                    list="idea-players"
+                    placeholder="e.g. Lamar Jackson"
+                    value={form.playerB}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const title = form.playerA && v ? `${form.playerA} vs ${v}` : form.title;
+                      setForm({ ...form, playerB: v, title, sides: resetSidesPicks(form.sides) });
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+          {form.category === "topx" && (
+            <div className="two-col">
+              <div>
+                <label>Player</label>
+                <input
+                  type="text"
+                  list="idea-players"
+                  placeholder="e.g. Ladd McConkey"
+                  value={form.topPlayer}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const title = v && form.topX ? `${v} — top ${form.topX}?` : form.title;
+                    setForm({ ...form, topPlayer: v, title, sides: resetSidesPicks(form.sides) });
+                  }}
+                />
+              </div>
+              <div>
+                <label>Top ___ (rank threshold)</label>
+                <input
+                  type="number"
+                  placeholder="e.g. 20"
+                  value={form.topX}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const title = form.topPlayer && v ? `${form.topPlayer} — top ${v}?` : form.title;
+                    setForm({ ...form, topX: v, title, sides: resetSidesPicks(form.sides) });
+                  }}
+                />
+              </div>
+            </div>
+          )}
           <label>Bet</label>
           <input
             type="text"
@@ -2042,21 +2224,34 @@ function BoardBetTracker() {
               <Chip person={p} />
               <strong style={{ width: 62, fontSize: 13 }}>{p}</strong>
               {form.sides[p].in ? (
-                <input
-                  type="text"
-                  placeholder={
-                    form.mode === "propose" && p !== form.proposer
-                      ? "optional — they'll set this when they accept"
-                      : "their pick / position on the bet"
-                  }
-                  value={form.sides[p].pick}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      sides: { ...form.sides, [p]: { ...form.sides[p], pick: e.target.value } },
-                    })
-                  }
-                />
+                formPickOptions() ? (
+                  <PickChoice
+                    options={formPickOptions()}
+                    value={form.sides[p].pick}
+                    onSelect={(opt) =>
+                      setForm({
+                        ...form,
+                        sides: { ...form.sides, [p]: { ...form.sides[p], pick: opt } },
+                      })
+                    }
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    placeholder={
+                      form.mode === "propose" && p !== form.proposer
+                        ? "optional — they'll set this when they accept"
+                        : "their pick / position on the bet"
+                    }
+                    value={form.sides[p].pick}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        sides: { ...form.sides, [p]: { ...form.sides[p], pick: e.target.value } },
+                      })
+                    }
+                  />
+                )
               ) : (
                 <span style={{ flex: 1, color: "#5A5A5A", fontSize: 12.5 }}>sitting this one out</span>
               )}
